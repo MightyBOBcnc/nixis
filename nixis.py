@@ -11,9 +11,9 @@ import meshzoo as mz
 import numpy as np
 from numba import jit, njit
 import pyvista as pv
-from opensimplex import OpenSimplex
 from scipy.spatial import KDTree
 from PIL import Image
+import opensimplex as osi
 from util import *
 
 # ToDo List:
@@ -137,6 +137,8 @@ def main():
 # Because we need the heights by themselves (not multiplied) for a lot of other steps like erosion, calculating wind, altitude temperature, exporting the png maps, etc..
 # Also we need to sample height more than one time (octaves) and multiply those together before we ever need to multiply by the vertices. Multiplied is only needed for visualizing a 'finalized_height'.
 # =============================================
+    # Initialize the permutation arrays to be used in noise generation
+    perm, pgi = osi.init(world_seed)
     # Ocean altitude is a *relative* percent of the max altitude
     alt_ocean = 0.4
     n_strength = 0.2
@@ -146,17 +148,24 @@ def main():
     # Numba performance when k=900 - SN4: 14.2s, SN3: 16s, SN2: 16.6s, SN1: 19.5s
     print("Sampling noise...")
 
-#    height = sample_octaves(points, None, world_seed, 2, n_roughness, n_strength, n_persistence, alt_ocean)
+#    height = sample_octaves(points, None, perm, pgi, 2, n_roughness, n_strength, n_persistence, alt_ocean)
 
-#    height2 = sample_octaves(points, height, world_seed, n_octaves, 2, 0.25, 0.5, 0.6)
+#    height2 = sample_octaves(points, height, perm, pgi, n_octaves, 2, 0.25, 0.5, 0.6)
 
-#    height3 = sample_octaves(points, height2, world_seed+1, 2, 1.5, 0.5, 0.25, 0.25)
+#    height3 = sample_octaves(points, height2, perm, pgi, 2, 1.5, 0.5, 0.25, 0.25)
 
-#    height = samplenoise4(points, world_seed, n_roughness, n_strength)
+#    height = sample_noise4(points, perm, pgi, n_roughness, n_strength)
 
-    heighta = samplenoise4(points, world_seed, 1.6, 0.4)
-    heightb = samplenoise4(points, world_seed, 5, 0.2)
-    heightc = samplenoise4(points, world_seed, 24, 0.02)
+    ha_start = time.perf_counter()
+    heighta = sample_noise4(points, perm, pgi, 1.6, 0.4)
+    hb_start = time.perf_counter()
+    heightb = sample_noise4(points, perm, pgi, 5, 0.2)
+    hc_start = time.perf_counter()
+    heightc = sample_noise4(points, perm, pgi, 24, 0.02)
+    h_end = time.perf_counter()
+    print(f"Total noise function runtime:   {hb_start - ha_start :.5f} sec")
+    print(f"Total noise function runtime:   {hc_start - hb_start :.5f} sec")
+    print(f"Total noise function runtime:   {h_end - hc_start :.5f} sec")
 
     heightp = (heighta + heightb + heightc) * 0.4
 
@@ -214,21 +223,20 @@ def main():
     # (There's also a PyVista mode that runs in the background and can be repeatedly updated, look into that.)
 
 # @njit  # Doesn't work because of the OpenSimplex object
-def samplenoise1(verts, world_seed=0, n_roughness=1, n_strength=0.2):
+def sample_noise1(verts, perm, pgi, n_roughness=1, n_strength=0.2):
     """Sample a simplex noise for given vertices"""
     time_start = time.perf_counter()
 
-    tmp = OpenSimplex(seed=world_seed)
     elevations = np.ones((len(verts), 1))
 
     time_el = time.perf_counter()
 
     # for v in range(len(verts)):
         # x, y, z = verts[v][0] * n_roughness, verts[v][1] * n_roughness, verts[v][2] * n_roughness
-        # point = tmp.noise3d(x,y,z) * n_strength + 1
+        # point = osi.noise3d(x, y, z, perm, pgi) * n_strength + 1
     for v, vert in enumerate(verts):
         x, y, z = vert[0] * n_roughness, vert[1] * n_roughness, vert[2] * n_roughness
-        elevations[v] = tmp.noise3d(x,y,z) * n_strength + 1
+        elevations[v] = osi.noise3d(x, y, z, perm, pgi) * n_strength + 1
 
     time_end = time.perf_counter()
 
@@ -240,13 +248,11 @@ def samplenoise1(verts, world_seed=0, n_roughness=1, n_strength=0.2):
     # print(elevations)
     return elevations
 
-def samplenoise2(verts, world_seed=0, n_roughness=1, n_strength=0.2):
+def sample_noise2(verts, perm, pgi, n_roughness=1, n_strength=0.2):
     time_start = time.perf_counter()
 
-    tmp = OpenSimplex(seed=world_seed)
-
     rough_verts = verts * n_roughness
-    elevations = np.array([[tmp.noise3d(v[0],v[1],v[2]) * n_strength + 1] for v in rough_verts])
+    elevations = np.array([[osi.noise3d(v[0], v[1], v[2], perm, pgi) * n_strength + 1] for v in rough_verts])
 
     # value = noise.pnoise2(noise_x, noise_y, octaves, persistence, lacunarity, random.randint(1, 9999))
 
@@ -259,55 +265,42 @@ def samplenoise2(verts, world_seed=0, n_roughness=1, n_strength=0.2):
     print(f"Total noise function runtime:   {time_end - time_start :.5f} sec")
     return elevations
 
-def samplenoise3(verts, world_seed=0, n_roughness=1, n_strength=0.2):
+def sample_noise3(verts, perm, pgi, n_roughness=1, n_strength=0.2):
     time_start = time.perf_counter()
-    tmp = OpenSimplex(seed=world_seed)
 
     rough_verts = verts * n_roughness
-    elevations = np.array([[tmp.noise3d(v[0],v[1],v[2])] for v in rough_verts]) * n_strength + 1
+    elevations = np.array([[osi.noise3d(v[0], v[1], v[2], perm, pgi)] for v in rough_verts]) * n_strength + 1
 
     time_end = time.perf_counter()
 
     print(f"Total noise function runtime:   {time_end - time_start :.5f} sec")
     return elevations
 
-def samplenoise4(verts, world_seed=0, n_roughness=1, n_strength=0.2):
+@njit(parallel=False, cache=True)
+def sample_noise4(verts, perm, pgi, n_roughness=1, n_strength=0.2):
     """Sample a simplex noise for given vertices"""
-    time_start = time.perf_counter()
-    tmp = OpenSimplex(seed=world_seed)
     elevations = np.ones(len(verts))
 
-    time_el = time.perf_counter()
-
     # It's faster to make another pre-multiplied array than it is to do:
-    # tmp.noise3d(vert[0]*n_roughness, vert[1]*n_roughness, vert[2]*n_roughness)
+    # osi.noise3d(vert[0]*n_roughness, vert[1]*n_roughness, vert[2]*n_roughness, perm, pgi)
     # For k=900 it only takes 0.1s to multiply, but 5.0s the other way.
     rough_verts = verts * n_roughness
-    time_noise = time.perf_counter()
 
     for v, vert in enumerate(rough_verts):
-        elevations[v] = tmp.noise3d(vert[0],vert[1],vert[2])
+        elevations[v] = osi.noise3d(vert[0], vert[1], vert[2], perm, pgi)
 
-    time_end = time.perf_counter()
-
-    print(f"Time to initialize np.ones:     {time_el - time_start :.5f} sec")
-    print(f"Time to multiply n_roughness:     {time_noise - time_el :.5f} sec")
-    print(f"Time to sample noise:           {time_end - time_noise :.5f} sec")
-    print(f"Total noise function runtime:   {time_end - time_start :.5f} sec")
     return np.reshape((elevations + 1) * 0.5 * n_strength, (len(verts), 1))
 
-def sample_octaves(verts, elevations=None, world_seed=0, n_octaves=1, n_roughness=2, n_strength=0.2, n_persistence=0.5, alt_ocean=0.4):
+def sample_octaves(verts, elevations, perm, pgi, n_octaves=1, n_roughness=2, n_strength=0.2, n_persistence=0.5, alt_ocean=0.4):
     if elevations is None:
         elevations = np.ones((len(verts), 1))
     n_freq = 1.0  # Frequency
     n_amp = 1.0  # Amplitude
     n_ocean = alt_ocean / n_octaves
 
-    tmp = OpenSimplex(seed=world_seed)
-
     for i in range(n_octaves):
         print(f"Octave {i+1}..")
-        elevations = elevations + samplenoiseX(verts, elevations, tmp, n_freq, n_amp)
+        elevations = elevations + sample_noiseX(verts, elevations, perm, pgi, n_freq, n_amp)
 
         n_freq *= n_roughness
         n_amp *= n_persistence
@@ -325,17 +318,17 @@ def sample_octaves(verts, elevations=None, world_seed=0, n_octaves=1, n_roughnes
     return np.clip(elevations, ocean_percent, emax) * n_strength
     # return elevations * n_strength
 
-def samplenoiseX(verts, elevations, tmp, n_roughness=1, n_amp=1.0):
+def sample_noiseX(verts, elevations, perm, pgi, n_roughness=1, n_amp=1.0):
     """Sample a simplex noise for given vertices"""
     time_start = time.perf_counter()
 
     # It's faster to make another pre-multiplied array than it is to do:
-    # tmp.noise3d(vert[0]*n_roughness, vert[1]*n_roughness, vert[2]*n_roughness)
+    # osi.noise3d(vert[0]*n_roughness, vert[1]*n_roughness, vert[2]*n_roughness, perm, pgi)
     # For k=900 it only takes 0.1s to multiply, but 5.0s the other way.
     rough_verts = verts * n_roughness
     time_noise = time.perf_counter()
     for v, vert in enumerate(rough_verts):
-        elevations[v] = (tmp.noise3d(vert[0],vert[1],vert[2]) + 1) * 0.5 * n_amp
+        elevations[v] = (osi.noise3d(vert[0], vert[1], vert[2], perm, pgi) + 1) * 0.5 * n_amp
 
     time_end = time.perf_counter()
     rough_verts = None
@@ -348,7 +341,7 @@ def samplenoiseX(verts, elevations, tmp, n_roughness=1, n_amp=1.0):
 # Disappointing. Multithreading does improve the sample time but does not
 # Combine with numba-fied opensimplex at all. In fact it's WORSE than
 # plain numba-fied opensimplex.
-def samplenoise5(verts, world_seed=0, n_roughness=1, n_strength=0.2):
+def sample_noise5(verts, world_seed=0, n_roughness=1, n_strength=0.2):
     tmp = OpenSimplex(seed=world_seed)
     elevations = np.ones((len(verts), 1))
     rough_verts = verts * n_roughness
