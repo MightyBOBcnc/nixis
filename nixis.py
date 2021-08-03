@@ -9,7 +9,7 @@ import concurrent.futures
 import meshio as mi
 import meshzoo as mz
 import numpy as np
-from numba import jit, njit
+from numba import njit
 import pyvista as pv
 from scipy.spatial import KDTree
 from PIL import Image
@@ -68,7 +68,7 @@ def main():
         print("")
         print("Divisions must be a positive number.")
         sys.exit(0)
-    if args.divisions > 1000:
+    if args.divisions > 2300:
         print("Hold up, friend. Are you sure your computer can handle such a big world?")
         # ToDo: Get user Y/N confirmation and exit or continue. (and better prompt text)
         sys.exit(0)
@@ -138,7 +138,11 @@ def main():
 # Also we need to sample height more than one time (octaves) and multiply those together before we ever need to multiply by the vertices. Multiplied is only needed for visualizing a 'finalized_height'.
 # =============================================
     # Initialize the permutation arrays to be used in noise generation
+    time_start = time.perf_counter()
     perm, pgi = osi.init(world_seed)
+    time_end = time.perf_counter()
+    print(f"Time to init permutation arrays:   {time_end - time_start :.5f} sec")
+
     # Ocean altitude is a *relative* percent of the max altitude
     alt_ocean = 0.4
     n_strength = 0.2
@@ -276,6 +280,7 @@ def sample_noise3(verts, perm, pgi, n_roughness=1, n_strength=0.2):
     print(f"Total noise function runtime:   {time_end - time_start :.5f} sec")
     return elevations
 
+# Setting parallel to True has some overhead but does help when subd >= 1500
 @njit(parallel=False, cache=True)
 def sample_noise4(verts, perm, pgi, n_roughness=1, n_strength=0.2):
     """Sample a simplex noise for given vertices"""
@@ -291,13 +296,14 @@ def sample_noise4(verts, perm, pgi, n_roughness=1, n_strength=0.2):
 
     return np.reshape((elevations + 1) * 0.5 * n_strength, (len(verts), 1))
 
-def sample_octaves(verts, elevations, perm, pgi, n_octaves=1, n_roughness=2, n_strength=0.2, n_persistence=0.5, alt_ocean=0.4):
+def sample_octaves(verts, elevations, perm, pgi, n_octaves=1, n_roughness=3, n_strength=0.2, n_persistence=0.5, alt_ocean=0.4):
     if elevations is None:
         elevations = np.ones((len(verts), 1))
     n_freq = 1.0  # Frequency
     n_amp = 1.0  # Amplitude
     n_ocean = alt_ocean / n_octaves
-
+    # In my separate-sampling experiment, rough/strength pairs of (1.6, 0.4) (5, 0.2) and (24, 0.02) were good for 3 octaves
+    # The final 3 results were added and then multiplied by 0.4
     for i in range(n_octaves):
         print(f"Octave {i+1}..")
         elevations = elevations + sample_noiseX(verts, elevations, perm, pgi, n_freq, n_amp)
@@ -431,8 +437,17 @@ def visualize(verts, tris, heights=None, search_point=None, neighbors=None):
     y_axisline = pv.Line([0,-1.5,0],[0,1.5,0])
     z_axisline = pv.Line([0,0,-1.5],[0,0,1.5])
 
+    # Clip the heights again so we can show water separately from land gradient
+    # by cleverly using the below_color for anything below what we clip here.
+    minval = np.amin(heights)
+    maxval = np.amax(heights)
+    heights = np.clip(heights, minval*1.001, maxval)
+
+    sargs = dict(below_label="Ocean")
+
     pl = pv.Plotter()
-    pl.add_mesh(mesh, show_edges = False, color = "white", scalars=heights, culling = "back")
+    pl.add_mesh(mesh, show_edges = False, color="white", below_color="blue", scalars=heights, cmap="algae_r", culling = "back", scalar_bar_args=sargs)
+    # pl.add_scalar_bar(below_label="Ocean")
     if search_point is not None and neighbors is not None:
         pl.add_mesh(neighbor_dots, point_size=15.0, color = "magenta")
         pl.add_mesh(search_dot, point_size=15.0, color = "purple")
