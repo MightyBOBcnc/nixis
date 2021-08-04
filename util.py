@@ -49,6 +49,7 @@ def latlon2xyz(lat, lon, r=1):
     z = r * np.sin(lat*(np.pi/180))
     return (x, y, z)
 
+# https://stats.stackexchange.com/questions/351696/normalize-an-array-of-numbers-to-specific-range
 # https://learn.64bitdragon.com/articles/computer-science/data-processing/min-max-normalization
 def rescale(x, lower, upper):
     """Re-scale (normalize) a list, x, to a given lower and upper bound."""
@@ -59,11 +60,11 @@ def rescale(x, lower, upper):
     return np.array([((a - x_min) / x_range) * new_range + lower for a in x])
 
 def make_ranges(arr_len, threads):
-    """Split vert array into ranges for threading.
-    arr_len -- Integer. The length of the array to be split.
-    threads -- Integer. The number of threads you want to use
+    """Make number ranges for threading from a given length.
+    arr_len -- Integer. The length of the data to be split.
+    threads -- Integer. The number of chunks/threads you want to use.
     """
-    x = int(arr_len/(threads))
+    x = int(arr_len/threads)
     # print("x is", x)
     range_list = []
     for i in range(threads + 2):
@@ -99,6 +100,7 @@ def construct_map_export(width, height, tree, colors=None):
     # directly on a vertex, and 'weighting' the contribution of each vert
     # to the averaged color based on distance (which we know, thanks to KDtree)
 
+    # Initialize array with magenta as debug color in case pixels get missed
     map_array = np.full((height, width, 3), [255, 0, 255])
     print("Sampling verts for texture...")
     lat = 90
@@ -108,13 +110,29 @@ def construct_map_export(width, height, tree, colors=None):
 
     time_start = time.perf_counter()
     # ToDo: This is slow. Speed it up. Problem: numba hates the tree object.
-    # Loop through Latitude. Pixels are filled per row.
+    # Maybe somehow I could do an Enumerate instead? As with all of my problems, the hard part is quickly filling the arrays with the data to begin with, not the computations on the data once the arrays are already full.
+    # There may also be some sort of benefit to pre-calculating the nearest N neighbors for each lat/lon into their own array in the background?
+    # (in the future when there's enough stuff going on that there is even time for backgrond processing)
+    # Loop through Latitude starting at north pole. Pixels are filled per row.
     for h in range(height):
-        print(f"Starting row {h+1}")
+#        print(f"Starting row {h+1}")
         # Loop through each Longitude per latitude.
         for w in range(width):
-            neighbors = tree.query(latlon2xyz(lat,lon), 3)
-            value = int((colors[neighbors[1][0]] + colors[neighbors[1][1]] + colors[neighbors[1][2]]) / len(neighbors[1]))
+            # Query result[0] is distances, result[1] is vert IDs
+            # ToDo: I wonder if there is any notable difference to using 2 vars instead of 1 (like distances, neighbors = yadda instead of neighbors = yadda)
+            # nbr = tree.query(latlon2xyz(lat,lon), 3)  # ToDo: Query can accept an array of points to query which may be faster than doing one point at a time.
+            # value = int((colors[nbr[1][0]] + colors[nbr[1][1]] + colors[nbr[1][2]]) / len(nbr[1]))
+
+            # How to get a weighted average for vertex colors:
+            # https://math.stackexchange.com/questions/3817854/formula-for-inverse-weighted-average-smaller-value-gets-higher-weight
+            d, nbr = tree.query(latlon2xyz(lat,lon), 3)
+            sd = sum(d)
+            ws = [d[0]/sd, d[1]/sd, d[2]/sd]  # Weights that add up to 1
+            v = [1/ws[0], 1/ws[1], 1/ws[2]]
+            t = sum(v)
+            u = [v[0]/t, v[1]/t, v[2]/t]  # Inverted weights
+            value = int(colors[nbr[0]]*u[0] + colors[nbr[1]]*u[1] + colors[nbr[2]]*u[2])
+
             map_array[h][w] = [value, value, value]
             lon -= (lonpercent)  # ToDo: If we're on the final loop, don't allow lon to exceed -180
         lat -= (latpercent)  # ToDo: If we're on the final loop, don't allow lat to exceed -90
@@ -157,7 +175,8 @@ def image_to_array(image_file):
     return data
 
 # ToDo: Get user Y/N confirmation for large meshes (might actually do this back in main before calling this)
-# And MAYBE add support for multiple output formats (e.g. ply, obj, etc)
+# - And MAYBE add support for multiple output formats (e.g. ply, obj, etc)
+# - Add support for exporting vertex color? But which data to use? Height?
 # It should be noted that Blender's obj importer will change the vertex order
 # by default and won't match the vert order from meshzoo's points/cells arrays.
 # This is not a problem with Blender's ply importer.
@@ -198,3 +217,53 @@ def load_settings(path):
 def export_planet(data, path, name):
     """Export the planet as a database file."""
     print("Not implemented yet.")
+
+def build_adjacency(length, tris):
+    """Build an array of adjacencies for each mesh vertex."""
+    adjacency = np.full((length, 6), -1, dtype=np.int32)
+    # The 12 original vertices will always have connectivity of 5 instead of 6, so for the 6th number we can assign -1 because there's no such thing as a vert with ID of -1
+    for t in tris:  # Triangle is 3 verts
+        for v in t:  # We have to do this for every vert in the triangle
+            # As an aside, there might be a clever way to run these 3 if comparisons backward as well to fill the adjacency list faster?  Like first run for v in t forward, then backward. OR do like, neighbor_next = X, neighbor_prev = Y
+            if v == t[v][0]:
+                neighbor = t[v][1]
+                # neighbor_prev = t[v][2]
+            elif v == t[v][1]:
+                neighbor = t[v][2]
+                # neighbor_prev = t[v][0]
+            elif v == t[v][2]:
+                neighbor = t[v][0]
+                # neighbor_prev = t[v][1]
+            try:
+                i = adjacency[v]
+                place, = [np.where(i == -1)]
+                print(f"place is {place[0][0]}")
+            except:
+                pass
+            adjacency[v][place] = neighbor  # Probably needs to be inside the try
+            # Maybe.. Read the values of adjacency[v] and insert the new value at the end of the empties?
+            # Like let's say that v is 30 and looks like this:
+            # [12, 6, , , , ]  (Note that this data shape wouldn't have a 'cycle' like delaunator so I couldn't 'walk' forward or backward for, e.g. limiting the allowed output edges for river networks to prevent ugly loopbacks)
+            # We found a new value that isn't already in v (say it's 27).***
+            # There are already values at positions 0 and 1, so want to insert the new value at adjacency[v][2]
+            # So really I guess what we are looking for is to find out the first position that IS an empty (Note to self: Must find out what an 'empty' value's return type is.  Is it a number or None or what?)
+            # I bet that the len(v) is probably 6 even when empty so it's not as simple as adjacency[v][len(v+1)] = v[X] (where X is 0, 1, or 2)
+            #
+            # ***(OH GOD, there needs to be a comparison to the values already in v to see if the new value is already there? Or maybe not because we inherently know that meshzoo won't ever do that
+            # so we can do "unsafe" assumptions without actually checking against existing values, we only need to know how many places are already occupied? Or maybe we do need to check existing values
+            # because multiple triangles can share 2 vertices and we don't want double entries.)
+            #
+            # There may or may not be a numpy way to slice up the tris array, like, vertically, to build some tuple pairs.
+            # Maybe it would be handy to build both array types, one of tuples and the other that knows every vert's neighbors for fast reference or something.
+    # This all might be more complicated than required..
+    # Maybe could do like..
+    # for t in tris:
+    #     adjacency[t[0]][place] = t[1]
+    #     adjacency[t[0]][place] = t[2]
+
+    #     adjacency[t[1]][place] = t[2]
+    #     adjacency[t[1]][place] = t[0]
+
+    #     adjacency[t[2]][place] = t[0]
+    #     adjacency[t[2]][place] = t[1]
+    # And then the problem becomes cycling 'place'
