@@ -106,7 +106,8 @@ def construct_map_export(width, height, tree, colors=None):
     lat = 90
     lon = 180
     latpercent = 180 / (height - 1)
-    lonpercent = 360 / (width - 1)
+    # lonpercent = 360 / (width - 1)
+    lonpercent = 360 / width  # ToDo: Fix hairline seam where the image wraps around the sides. We don't actually want to reach -180 because it's the same as +180.
 
     time_start = time.perf_counter()
     # ToDo: This is slow. Speed it up. Problem: numba hates the tree object.
@@ -120,22 +121,27 @@ def construct_map_export(width, height, tree, colors=None):
         for w in range(width):
             # Query result[0] is distances, result[1] is vert IDs
             # ToDo: I wonder if there is any notable difference to using 2 vars instead of 1 (like distances, neighbors = yadda instead of neighbors = yadda)
-            # nbr = tree.query(latlon2xyz(lat,lon), 3)  # ToDo: Query can accept an array of points to query which may be faster than doing one point at a time.
-            # value = int((colors[nbr[1][0]] + colors[nbr[1][1]] + colors[nbr[1][2]]) / len(nbr[1]))
-
+            # ToDo: Query can accept an array of points to query which may be faster than doing one point at a time.
             # How to get a weighted average for vertex colors:
             # https://math.stackexchange.com/questions/3817854/formula-for-inverse-weighted-average-smaller-value-gets-higher-weight
             d, nbr = tree.query(latlon2xyz(lat,lon), 3)
             sd = sum(d)
-            ws = [d[0]/sd, d[1]/sd, d[2]/sd]  # Weights that add up to 1
-            v = [1/ws[0], 1/ws[1], 1/ws[2]]
+            ws = [i/sd for i in d]  # Weights that add up to 1
+            v = [1/i for i in ws]
             t = sum(v)
-            u = [v[0]/t, v[1]/t, v[2]/t]  # Inverted weights
-            value = int(colors[nbr[0]]*u[0] + colors[nbr[1]]*u[1] + colors[nbr[2]]*u[2])
+            u = [i/t for i in v]  # Inverted weights
+            value = int(sum([colors[nbr[i]]*f for i, f in enumerate(u)]))
 
             map_array[h][w] = [value, value, value]
-            lon -= (lonpercent)  # ToDo: If we're on the final loop, don't allow lon to exceed -180
-        lat -= (latpercent)  # ToDo: If we're on the final loop, don't allow lat to exceed -90
+            # if lat == -90:
+            #     print("Lon:", lon)
+            lon -= (lonpercent)
+            if lon < -180:
+                lon = -180
+        # print("Lat:", lat)
+        lat -= (latpercent)
+        if lat < -90:
+            lat = -90
         lon = 180  # Reset to 180 for each new pixel row.
     
 #    print("The map array is now:", map_array)
