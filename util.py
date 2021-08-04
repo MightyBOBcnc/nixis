@@ -107,7 +107,7 @@ def construct_map_export(width, height, tree, colors=None):
     lon = 180
     latpercent = 180 / (height - 1)
     # lonpercent = 360 / (width - 1)
-    lonpercent = 360 / width  # ToDo: Fix hairline seam where the image wraps around the sides. We don't actually want to reach -180 because it's the same as +180.
+    lonpercent = 360 / width  # ToDo: Fix hairline seam where the image wraps around the sides. We don't actually want to reach -180 because it's the same as +180. (Might not be an issue at higher subdivisions >= 900)
 
     time_start = time.perf_counter()
     # ToDo: This is slow. Speed it up. Problem: numba hates the tree object.
@@ -121,15 +121,14 @@ def construct_map_export(width, height, tree, colors=None):
         for w in range(width):
             # Query result[0] is distances, result[1] is vert IDs
             # ToDo: I wonder if there is any notable difference to using 2 vars instead of 1 (like distances, neighbors = yadda instead of neighbors = yadda)
-            # ToDo: Query can accept an array of points to query which may be faster than doing one point at a time.
+            # ToDo: Query can accept an array of points to query which may be faster than doing one point at a time. It could also then be done outside of the function and passed as an array, which would allow @njit decorating construct_map_export
             # How to get a weighted average for vertex colors:
             # https://math.stackexchange.com/questions/3817854/formula-for-inverse-weighted-average-smaller-value-gets-higher-weight
             d, nbr = tree.query(latlon2xyz(lat,lon), 3)
             sd = sum(d)
-            ws = [i/sd for i in d]  # Weights that add up to 1
-            v = [1/i for i in ws]
-            t = sum(v)
-            u = [i/t for i in v]  # Inverted weights
+            ws = [1/(i/sd) for i in d]
+            t = sum(ws)
+            u = [i/t for i in ws]  # Inverted weights
             value = int(sum([colors[nbr[i]]*f for i, f in enumerate(u)]))
 
             map_array[h][w] = [value, value, value]
