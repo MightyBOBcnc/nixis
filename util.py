@@ -13,7 +13,7 @@ from scipy.spatial import KDTree
 def create_mesh(divisions):
     # Note: meshzoo creates its icosahedrons aligned to the world axis.
     # Maya's icosahedron platonic is rotated -58.282 on Y for some reason.
-    # Unsurprisingly, the vertex order is also different.
+    # Unsurprisingly, the vertex order is also different.  # ToDo: Was that because of the obj importer?  Check this in maya again.
     # meshzoo's winding looks counter-clockwise?
     # Observation: When k is even meshzoo will put a vertex at the N & S pole.
     # Blender's ico has options for point, edge, or face up. Point up always
@@ -23,8 +23,8 @@ def create_mesh(divisions):
     time_start = time.perf_counter()
     points, cells = mz.icosa_sphere(divisions)
     time_end = time.perf_counter()
-    print(f"Number of vertices: {points.shape[0]:,}")
-    print(f"Number of triangles: {cells.shape[0]:,}")
+    print(f"Number of vertices: {points.shape[0]:,}")  # Verts is (tris+4) / 2
+    print(f"Number of triangles: {cells.shape[0]:,}")  # Tris is (verts*2) - 4
     print(f"Mesh generated in {time_end - time_start :.5f} sec")
     return points, cells
 
@@ -34,6 +34,7 @@ def create_mesh(divisions):
 # 3. Is there any speed difference between e.g. np.arcsin / math.arcsin, etc.?
 # 4. Test on a large image export: Will latlon2xyz run any faster with @njit?
 
+# https://stackoverflow.com/questions/56945401/converting-xyz-coordinates-to-longitutde-latitude-in-python/56945561#56945561
 def xyz2latlon(x, y, z, r=1):
     lat = np.degrees(np.arcsin(z / r))
     lon = np.degrees(np.arctan2(y, x))
@@ -42,6 +43,8 @@ def xyz2latlon(x, y, z, r=1):
 #    lon = math.atan2(y, x)
     return (lat, lon)
 
+# This answer is mostly right but we have to compensate for degrees/radians.
+# https://stackoverflow.com/questions/1185408/converting-from-longitude-latitude-to-cartesian-coordinates/1185413#1185413
 # @njit
 def latlon2xyz(lat, lon, r=1):
     x = r * np.cos(lat*(np.pi/180)) * np.cos(lon*(np.pi/180))
@@ -223,52 +226,41 @@ def export_planet(data, path, name):
     """Export the planet as a database file."""
     print("Not implemented yet.")
 
-def build_adjacency(length, tris):
+# https://stackoverflow.com/questions/7632963/numpy-find-first-index-of-value-fast/29799815#29799815
+@njit(cache=True)
+def find_first(item, vec):
+    """Return the index of the first occurence of item in vec."""
+    for i in range(len(vec)):  # Seems a smidge faster than enumerate
+        if item == vec[i]:
+            return i
+    # Safety fallback (probably shouldn't ever happen)
+    return -1
+
+# ToDo: This is pretty fast for k=2500 but maybe try multithreading later.
+def build_adjacency(triangles):
     """Build an array of adjacencies for each mesh vertex."""
-    adjacency = np.full((length, 6), -1, dtype=np.int32)
-    # The 12 original vertices will always have connectivity of 5 instead of 6, so for the 6th number we can assign -1 because there's no such thing as a vert with ID of -1
-    for t in tris:  # Triangle is 3 verts
-        for v in t:  # We have to do this for every vert in the triangle
-            # As an aside, there might be a clever way to run these 3 if comparisons backward as well to fill the adjacency list faster?  Like first run for v in t forward, then backward. OR do like, neighbor_next = X, neighbor_prev = Y
-            if v == t[v][0]:
-                neighbor = t[v][1]
-                # neighbor_prev = t[v][2]
-            elif v == t[v][1]:
-                neighbor = t[v][2]
-                # neighbor_prev = t[v][0]
-            elif v == t[v][2]:
-                neighbor = t[v][0]
-                # neighbor_prev = t[v][1]
-            try:
-                i = adjacency[v]
-                place, = [np.where(i == -1)]
-                print(f"place is {place[0][0]}")
-            except:
-                pass
-            adjacency[v][place] = neighbor  # Probably needs to be inside the try
-            # Maybe.. Read the values of adjacency[v] and insert the new value at the end of the empties?
-            # Like let's say that v is 30 and looks like this:
-            # [12, 6, , , , ]  (Note that this data shape wouldn't have a 'cycle' like delaunator so I couldn't 'walk' forward or backward for, e.g. limiting the allowed output edges for river networks to prevent ugly loopbacks)
-            # We found a new value that isn't already in v (say it's 27).***
-            # There are already values at positions 0 and 1, so want to insert the new value at adjacency[v][2]
-            # So really I guess what we are looking for is to find out the first position that IS an empty (Note to self: Must find out what an 'empty' value's return type is.  Is it a number or None or what?)
-            # I bet that the len(v) is probably 6 even when empty so it's not as simple as adjacency[v][len(v+1)] = v[X] (where X is 0, 1, or 2)
-            #
-            # ***(OH GOD, there needs to be a comparison to the values already in v to see if the new value is already there? Or maybe not because we inherently know that meshzoo won't ever do that
-            # so we can do "unsafe" assumptions without actually checking against existing values, we only need to know how many places are already occupied? Or maybe we do need to check existing values
-            # because multiple triangles can share 2 vertices and we don't want double entries.)
-            #
-            # There may or may not be a numpy way to slice up the tris array, like, vertically, to build some tuple pairs.
-            # Maybe it would be handy to build both array types, one of tuples and the other that knows every vert's neighbors for fast reference or something.
-    # This all might be more complicated than required..
-    # Maybe could do like..
-    # for t in tris:
-    #     adjacency[t[0]][place] = t[1]
-    #     adjacency[t[0]][place] = t[2]
+    # The 12 original vertices have connectivity of 5 instead of 6 so for the
+    # 6th number we assign -1 as there's no such thing as a vert with ID of -1
+    adj = np.full((int((len(triangles)+4)/2), 6), -1, dtype=np.int32)
 
-    #     adjacency[t[1]][place] = t[2]
-    #     adjacency[t[1]][place] = t[0]
+    for t in triangles:
+        # i0 = find_first(-1, adj[t[0]])
+        # i1 = find_first(-1, adj[t[1]])
+        # i2 = find_first(-1, adj[t[2]])
+        # adj[t[0]][i0] = t[1]
+        # adj[t[1]][i1] = t[2]
+        # adj[t[2]][i2] = t[0]
 
-    #     adjacency[t[2]][place] = t[0]
-    #     adjacency[t[2]][place] = t[1]
-    # And then the problem becomes cycling 'place'
+        adj[t[0]][find_first(-1, adj[t[0]])] = t[1]
+        adj[t[1]][find_first(-1, adj[t[1]])] = t[2]
+        adj[t[2]][find_first(-1, adj[t[2]])] = t[0]
+    # print(triangles)
+    # print(adj)
+    return adj
+    # (Note that this data shape wouldn't have a 'cycle' like delaunator so I couldn't 'walk' forward or backward for, e.g. limiting the allowed output edges for river networks to prevent ugly loopbacks)
+    #
+    # There is also a nice numpy way to slice up the tris array, vertically, to build some tuple pairs.
+    # Maybe it would be handy to build both array types, one of tuples and the other that knows every vert's neighbors for fast reference or something.
+    # Also due to the existence of the winding order the tuple slicing wouldn't have to be run forward and then backward, because the neighbor face of an edge already 'runs it backward'.
+    # e.g. The triangles [0,11,5] and [0,10,11] would produce [0-->11] and [11-->0] pairs when sliced forward only [v0,v1][v1,v2][v2,v0]
+    # However we could probably build any tuples required on the fly like (v, adj[v][x]) where v is the first vert ID and x is the other vert ID from inside adj[v]
