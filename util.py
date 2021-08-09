@@ -6,20 +6,20 @@ import meshzoo as mz
 import meshio as mi
 from PIL import Image
 import numpy as np
-from numba import njit
+from numba import njit, prange
 from scipy.spatial import KDTree
 
 
 def create_mesh(divisions):
     # Note: meshzoo creates its icosahedrons aligned to the world axis.
     # Maya's icosahedron platonic is rotated -58.282 on Y for some reason.
-    # Unsurprisingly, the vertex order is also different.  # ToDo: Was that because of the obj importer?  Check this in maya again.
+    # Unsurprisingly, the vertex order is also different.
     # meshzoo's winding looks counter-clockwise?
     # Observation: When k is even meshzoo will put a vertex at the N & S pole.
     # Blender's ico has options for point, edge, or face up. Point up always
     # puts a pentagon at the N & S pole. Edge up behaves like meshzoo.
     print("Generating the mesh...")
-    print(f"k is {divisions}")
+    print(f"k is {divisions}")  # Verts is k * (k*10) + 2 aka (k^2 * 10) + 2
     time_start = time.perf_counter()
     points, cells = mz.icosa_sphere(divisions)
     time_end = time.perf_counter()
@@ -199,7 +199,7 @@ def save_mesh(verts, tris, path, name, format=None):
     # mesh = mi.Mesh(points, cells)
     print("Saving mesh to disk...")
     time_start = time.perf_counter()
-    out_path = os.path.join(path, f"{name}.ply")
+    out_path = os.path.join(path, f"{name}.obj")
     mi.write_points_cells(out_path, verts, {"triangle": tris})
     time_end = time.perf_counter()
     print(f"Mesh saved in {time_end - time_start :.5f} sec")
@@ -237,6 +237,14 @@ def find_first(item, vec):
     return -1
 
 # ToDo: This is pretty fast for k=2500 but maybe try multithreading later.
+# Could make a secondary function that just returns the index position and the
+# value and then multithread map that and do the actual setting of the values
+# in the adj array in build_adjacency like the make_square test.py example.
+# vert = t[0]
+# idx = find_first(-1, adj[vert])
+# val = t[1]
+# return vert, idx, val
+@njit(cache=True)
 def build_adjacency(triangles):
     """Build an array of adjacencies for each mesh vertex."""
     # The 12 original vertices have connectivity of 5 instead of 6 so for the
@@ -244,12 +252,15 @@ def build_adjacency(triangles):
     adj = np.full((int((len(triangles)+4)/2), 6), -1, dtype=np.int32)
 
     for t in triangles:
-        # i0 = find_first(-1, adj[t[0]])
-        # i1 = find_first(-1, adj[t[1]])
-        # i2 = find_first(-1, adj[t[2]])
-        # adj[t[0]][i0] = t[1]
-        # adj[t[1]][i1] = t[2]
-        # adj[t[2]][i2] = t[0]
+        # v0 = t[0]
+        # v1 = t[1]
+        # v2 = t[2]
+        # i0 = find_first(-1, adj[v0])
+        # i1 = find_first(-1, adj[v1])
+        # i2 = find_first(-1, adj[v2])
+        # adj[v0][i0] = v1
+        # adj[v1][i1] = v2
+        # adj[v2][i2] = v0
 
         adj[t[0]][find_first(-1, adj[t[0]])] = t[1]
         adj[t[1]][find_first(-1, adj[t[1]])] = t[2]
@@ -264,3 +275,40 @@ def build_adjacency(triangles):
     # Also due to the existence of the winding order the tuple slicing wouldn't have to be run forward and then backward, because the neighbor face of an edge already 'runs it backward'.
     # e.g. The triangles [0,11,5] and [0,10,11] would produce [0-->11] and [11-->0] pairs when sliced forward only [v0,v1][v1,v2][v2,v0]
     # However we could probably build any tuples required on the fly like (v, adj[v][x]) where v is the first vert ID and x is the other vert ID from inside adj[v]
+
+# ~10x faster than a list comprehension when numba gets its hands on it
+@njit(cache=True)
+def next_vert(v, arr1, arr2):
+    for i in arr1:
+        if i in arr2:
+            if i != v:
+                return i
+    return -1
+
+# Using numba's prange instead of python's range lets numba auto-parallelize
+# Takes about 5 seconds for a k=2500 mesh, otherwise would take ~10 seconds.
+# Note: This produces a proper 'cycle' for each vertex but the winding order
+# is not consistent; some are clockwise and some are counter-clockwise.
+@njit(cache=True, parallel=True, nogil=True)
+def sort_adjacency(adj):
+    for idx in prange(12):
+        visited = np.full(6, -1, dtype=np.int32)
+        pv = idx
+        nv = adj[idx][0]
+        for i in prange(4):  # First 12 verts have connectivity 5
+            visited[i] = nv
+            nv = next_vert(pv, adj[idx], adj[nv])
+            pv = visited[i]
+        visited[4] = nv
+        adj[idx] = visited
+
+    for idx in prange(12, len(adj)):
+        visited = np.full(6, -1, dtype=np.int32)
+        pv = idx
+        nv = adj[idx][0]
+        for i in prange(5):  # All remaining verts have connectivity 6
+            visited[i] = nv
+            nv = next_vert(pv, adj[idx], adj[nv])
+            pv = visited[i]
+        visited[5] = nv
+        adj[idx] = visited
