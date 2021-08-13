@@ -35,6 +35,7 @@ def create_mesh(divisions):
 # 4. Test on a large image export: Will latlon2xyz run any faster with @njit?
 
 # https://stackoverflow.com/questions/56945401/converting-xyz-coordinates-to-longitutde-latitude-in-python/56945561#56945561
+@njit(cache=True)
 def xyz2latlon(x, y, z, r=1):
     lat = np.degrees(np.arcsin(z / r))
     lon = np.degrees(np.arctan2(y, x))
@@ -45,7 +46,7 @@ def xyz2latlon(x, y, z, r=1):
 
 # This answer is mostly right but we have to compensate for degrees/radians.
 # https://stackoverflow.com/questions/1185408/converting-from-longitude-latitude-to-cartesian-coordinates/1185413#1185413
-# @njit
+# @njit(cache=True)
 def latlon2xyz(lat, lon, r=1):
     x = r * np.cos(lat*(np.pi/180)) * np.cos(lon*(np.pi/180))
     y = r * np.cos(lat*(np.pi/180)) * np.sin(lon*(np.pi/180))
@@ -54,6 +55,11 @@ def latlon2xyz(lat, lon, r=1):
 
 # https://stats.stackexchange.com/questions/351696/normalize-an-array-of-numbers-to-specific-range
 # https://learn.64bitdragon.com/articles/computer-science/data-processing/min-max-normalization
+# ToDo: Need to take a closer look at the shape of the data that is acceptable for this function
+# because I've had some weird issues with numba not wanting to compile the return values
+# if the array wasn't flattened before being set to rescale()
+# ToDo: Check for divide by 0 errors in the logic.
+@njit(cache=True)
 def rescale(x, lower, upper):
     """Re-scale (normalize) a list, x, to a given lower and upper bound."""
     x_min = np.min(x)
@@ -119,9 +125,13 @@ def construct_map_export(width, height, tree, colors=None):
     # (in the future when there's enough stuff going on that there is even time for backgrond processing)
     # Loop through Latitude starting at north pole. Pixels are filled per row.
     for h in range(height):
-#        print(f"Starting row {h+1}")
+        # print(f"Starting row {h+1}")
+        # print("Lat:", lat)
         # Loop through each Longitude per latitude.
         for w in range(width):
+            # print("Lon:", lon)
+            # if lat == -90:
+            #     print("Lon:", lon)
             # Query result[0] is distances, result[1] is vert IDs
             # ToDo: I wonder if there is any notable difference to using 2 vars instead of 1 (like distances, neighbors = yadda instead of neighbors = yadda)
             # ToDo: Query can accept an array of points to query which may be faster than doing one point at a time. It could also then be done outside of the function and passed as an array, which would allow @njit decorating construct_map_export
@@ -129,20 +139,22 @@ def construct_map_export(width, height, tree, colors=None):
             # https://math.stackexchange.com/questions/3817854/formula-for-inverse-weighted-average-smaller-value-gets-higher-weight
             d, nbr = tree.query(latlon2xyz(lat,lon), 3)
             sd = sum(d)
-            ws = [1/(i/sd) for i in d]
+            # Add a tiny amount to each i to (hopefully) prevent NaN and div by 0 errors
+            ws = [1 / ((i+0.00001) / sd) for i in d]  # ToDo: Variable names that make sense
             t = sum(ws)
             u = [i/t for i in ws]  # Inverted weights
             value = int(sum([colors[nbr[i]]*f for i, f in enumerate(u)]))
 
             map_array[h][w] = [value, value, value]
-            # if lat == -90:
-            #     print("Lon:", lon)
+
             lon -= (lonpercent)
-            if lon < -180:
+            if lon < -180 and w < width-1:
+                # print("longitude is:", lon)
                 lon = -180
-        # print("Lat:", lat)
+
         lat -= (latpercent)
-        if lat < -90:
+        if lat < -90 and h < height-1:
+            # print("latitude is:", lat)
             lat = -90
         lon = 180  # Reset to 180 for each new pixel row.
     
