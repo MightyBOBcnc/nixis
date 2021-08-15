@@ -46,7 +46,7 @@ def xyz2latlon(x, y, z, r=1):
 
 # This answer is mostly right but we have to compensate for degrees/radians.
 # https://stackoverflow.com/questions/1185408/converting-from-longitude-latitude-to-cartesian-coordinates/1185413#1185413
-# @njit(cache=True)
+@njit(cache=True)
 def latlon2xyz(lat, lon, r=1):
     x = r * np.cos(lat*(np.pi/180)) * np.cos(lon*(np.pi/180))
     y = r * np.cos(lat*(np.pi/180)) * np.sin(lon*(np.pi/180))
@@ -86,12 +86,12 @@ def make_ranges(arr_len, threads):
     # print(range_list)
     return range_list
 
-def build_KDTree(points):
+def build_KDTree(points, lf=10):
     print("Building KD Tree...")
     time_start = time.perf_counter()
     # Default leaf size is 10 
     # https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.KDTree.html
-    KDT = KDTree(points)
+    KDT = KDTree(points, leafsize=lf)
     time_end = time.perf_counter()
     print(f"KD built in {time_end - time_start :.5f} sec")
     return KDT
@@ -137,7 +137,7 @@ def construct_map_export(width, height, tree, colors=None):
             # ToDo: Query can accept an array of points to query which may be faster than doing one point at a time. It could also then be done outside of the function and passed as an array, which would allow @njit decorating construct_map_export
             # How to get a weighted average for vertex colors:
             # https://math.stackexchange.com/questions/3817854/formula-for-inverse-weighted-average-smaller-value-gets-higher-weight
-            d, nbr = tree.query(latlon2xyz(lat,lon), 3)
+            d, nbr = tree.query(latlon2xyz(max(lat - (h * latpercent), -90), max(lon - (w * lonpercent), -180)), 3, workers=1)
             sd = sum(d)
             # Add a tiny amount to each i to (hopefully) prevent NaN and div by 0 errors
             ws = [1 / ((i+0.00001) / sd) for i in d]  # ToDo: Variable names that make sense
@@ -147,17 +147,6 @@ def construct_map_export(width, height, tree, colors=None):
 
             map_array[h][w] = [value, value, value]
 
-            lon -= (lonpercent)
-            if lon < -180 and w < width-1:
-                # print("longitude is:", lon)
-                lon = -180
-
-        lat -= (latpercent)
-        if lat < -90 and h < height-1:
-            # print("latitude is:", lat)
-            lat = -90
-        lon = 180  # Reset to 180 for each new pixel row.
-    
 #    print("The map array is now:", map_array)
     time_end = time.perf_counter()
     print(f"Finished sampling in {time_end - time_start :.5f} sec")
