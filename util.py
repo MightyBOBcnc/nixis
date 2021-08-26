@@ -2,15 +2,18 @@
 import os
 import sys
 import time
+import json
 import meshzoo as mz
 import meshio as mi
 from PIL import Image
 import numpy as np
 from numba import njit, prange
 from scipy.spatial import KDTree
+# pylint: disable=not-an-iterable
 
 
 def create_mesh(divisions):
+    """Make a mesh with meshzoo"""
     # Note: meshzoo creates its icosahedrons aligned to the world axis.
     # Maya's icosahedron platonic is rotated -58.282 on Y for some reason.
     # Unsurprisingly, the vertex order is also different.
@@ -18,13 +21,27 @@ def create_mesh(divisions):
     # Observation: When k is even meshzoo will put a vertex at the N & S pole.
     # Blender's ico has options for point, edge, or face up. Point up always
     # puts a pentagon at the N & S pole. Edge up behaves like meshzoo.
+    #
+    # Obtain count of components starting from k:
+    #   Verts is (k^2 * 10) + 2
+    #   Edges is k^2 * 30
+    #   Tris is k^2 * 20
+    # Obtain count of components starting from verts:
+    #   Edges is (verts-2) * 3
+    #   Tris is (verts*2) - 4
+    # Obtain count of components starting from edges:
+    #   Verts is (edges / 3) + 2
+    #   Tris is edges / 1.5
+    # Obtain count of components starting from tris:
+    #   Verts is (tris+4) / 2
+    #   Edges is tris * 1.5
     print("Generating the mesh...")
-    print(f"k is {divisions}")  # Verts is k * (k*10) + 2 aka (k^2 * 10) + 2
+    print(f"k is {divisions}")
     time_start = time.perf_counter()
     points, cells = mz.icosa_sphere(divisions)
     time_end = time.perf_counter()
-    print(f"Number of vertices: {points.shape[0]:,}")  # Verts is (tris+4) / 2
-    print(f"Number of triangles: {cells.shape[0]:,}")  # Tris is (verts*2) - 4
+    print(f"Number of vertices: {points.shape[0]:,}")
+    print(f"Number of triangles: {cells.shape[0]:,}")
     print(f"Mesh generated in {time_end - time_start :.5f} sec")
     return points, cells
 
@@ -37,6 +54,7 @@ def create_mesh(divisions):
 # https://stackoverflow.com/questions/56945401/converting-xyz-coordinates-to-longitutde-latitude-in-python/56945561#56945561
 @njit(cache=True)
 def xyz2latlon(x, y, z, r=1):
+    """Convert 3D spatial XYZ coordinates into Latitude and Longitude."""
     lat = np.degrees(np.arcsin(z / r))
     lon = np.degrees(np.arctan2(y, x))
 
@@ -48,6 +66,7 @@ def xyz2latlon(x, y, z, r=1):
 # https://stackoverflow.com/questions/1185408/converting-from-longitude-latitude-to-cartesian-coordinates/1185413#1185413
 @njit(cache=True)
 def latlon2xyz(lat, lon, r=1):
+    """Convert Latitude and Longitude into 3D spatial XYZ coordinates."""
     x = r * np.cos(lat*(np.pi/180)) * np.cos(lon*(np.pi/180))
     y = r * np.cos(lat*(np.pi/180)) * np.sin(lon*(np.pi/180))
     z = r * np.sin(lat*(np.pi/180))
@@ -59,14 +78,38 @@ def latlon2xyz(lat, lon, r=1):
 # because I've had some weird issues with numba not wanting to compile the return values
 # if the array wasn't flattened before being set to rescale()
 # ToDo: Check for divide by 0 errors in the logic.
+# ToDo: This could possibly be faster with prange.
+# ToDo: If "mid" is supplied, then rescale the upper and lower values separately. (rescale with two ranges, lower to mid, and mid to upper)
 @njit(cache=True)
-def rescale(x, lower, upper):
+def rescale(x, lower, upper, mid=None, mode=None):
     """Re-scale (normalize) a list, x, to a given lower and upper bound."""
-    x_min = np.min(x)
-    x_max = np.max(x)
-    x_range = x_max - x_min
-    new_range = upper - lower
-    return np.array([((a - x_min) / x_range) * new_range + lower for a in x])
+    if mode is None:
+        if mid is None:
+            x_min = np.min(x)
+            x_max = np.max(x)
+            x_range = x_max - x_min
+            new_range = upper - lower
+            return np.array([((a - x_min) / x_range) * new_range + lower for a in x])
+            # ToDo: should this function even have a return value? Will we ever need the unmodified values? This can just operate on the input x array and replace its values?
+            #   Yes, there are times when we want a return value, like when we're rescaling to export a png; we don't want the original data to be modified there.
+        else:
+            print("Rescale upper and lower values separately.")
+    if mode is not None:
+        if mid is None:
+            print("ERROR: Must supply a middle value to use rescale modes.")  # ToDo: Maybe raise an exception instead
+        elif mode == 'lower':
+            x_min = np.min(x)
+            x_max = np.max(x)
+            midval = mid * x_max
+            x_range = midval - x_min
+            # new_range = upper - lower
+            new_range = 0 - lower  # The upper value for rescaling the lower values becomes 0  NOTE: Hold up, I think opensimplex might be returning values in the range 0 to 1, not -1 to +1
+            for a in prange(len(x)):
+                if x[a] <= midval:
+                    x[a] = ((x[a] - x_min) / x_range) * new_range + lower
+        elif mode == 'upper':
+            print("lol, implement me plz")
+
 
 def make_ranges(arr_len, threads):
     """Make number ranges for threading from a given length.
@@ -87,6 +130,7 @@ def make_ranges(arr_len, threads):
     return range_list
 
 def build_KDTree(points, lf=10):
+    """Build a KD-Tree from vertices with scipy."""
     print("Building KD Tree...")
     time_start = time.perf_counter()
     # Default leaf size is 10 
@@ -96,9 +140,50 @@ def build_KDTree(points, lf=10):
     print(f"KD built in {time_end - time_start :.5f} sec")
     return KDT
 
-# @njit  # Won't work with the tree object. Maybe one day numba-scipy will work
-# https://github.com/numba/numba-scipy
-def construct_map_export(width, height, tree, colors=None):
+# =============================================
+# Image-related utilities
+# =============================================
+
+@njit(cache=True, parallel=True, nogil=True)
+def make_ll_arr(width, height):
+    """Create an array of XYZ coordinates from latitudes and longitudes"""
+    map_array = np.ones((height, width, 3), dtype=np.float64)
+    lat = 90
+    lon = 180
+    latpercent = 180 / (height - 1)
+    # lonpercent = 360 / (width - 1)
+    lonpercent = 360 / width  # ToDo: Fix hairline seam where the image wraps around the sides. We don't actually want to reach -180 because it's the same as +180. (Might not be an issue at higher subdivisions >= 900)
+
+    # Loop through Latitude starting at north pole. Pixels are filled per row.
+    for h in prange(height):
+        # Loop through each Longitude per latitude.
+        for w in prange(width):
+            d = latlon2xyz(max(lat - (h * latpercent), -90), max(lon - (w * lonpercent), -180))
+            map_array[h][w] = d
+    return map_array
+
+# NOTE: Keep an eye out for weird numba compile failures in here.
+@njit(cache=True, parallel=True, nogil=True)
+def make_m_array(width, height, dists, nbrs, colors):
+    """Sample vertices and build a map for export."""
+    # debug_color = np.array([255,0,255], dtype=np.int32)
+    map_array = np.full((height, width, 3), 255, dtype=np.int32)
+    # print(map_array)
+
+    for h in prange(height):
+        for w in prange(width):
+            # https://math.stackexchange.com/questions/3817854/formula-for-inverse-weighted-average-smaller-value-gets-higher-weight
+            sd = np.sum(dists[h][w])  # Sum of distances
+            # Add a tiny amount to each i to (hopefully) prevent NaN and div by 0 errors
+            ws = np.array([1 / ((i+0.00001) / sd) for i in dists[h][w]], dtype=np.float64)  # weights
+            t = np.sum(ws)  # Total sum of weights
+            iw = np.array([i/t for i in ws], dtype=np.float64)  # Inverted weights
+            value = int(np.sum(np.array([colors[nbrs[h][w][i]]*iw[i] for i in range(len(iw))])))
+
+            map_array[h][w] = [value, value, value]
+    return map_array
+
+def build_image_data(imgquery, colors=None):  # Could rename this to like make_image_data
     """Use KD-Tree to sample vertices and build a map for export."""
     # ToDo: In the future I might have a vert array with vertex colors that
     # aren't in a separate height array so I'll need to add a verts argument or
@@ -106,51 +191,27 @@ def construct_map_export(width, height, tree, colors=None):
     # (This is why colors=None, in case it isn't passed, but hasn't been handled yet..)
     # Also need support for RGB arrays or RGBA if A stores a mask like rivers.
     # Possible improvements include averaging up to 6 neighbors if lat/lon is
-    # directly on a vertex, and 'weighting' the contribution of each vert
-    # to the averaged color based on distance (which we know, thanks to KDtree)
+    # directly on a vertex.
 
-    # Initialize array with magenta as debug color in case pixels get missed
-    map_array = np.full((height, width, 3), [255, 0, 255])
+    with open("options.json", "rt") as f:
+        o = f.read()
+    options = json.loads(o)
+    width = options["img_width"]
+    height = options["img_height"]
+
     print("Sampling verts for texture...")
-    lat = 90
-    lon = 180
-    latpercent = 180 / (height - 1)
-    # lonpercent = 360 / (width - 1)
-    lonpercent = 360 / width  # ToDo: Fix hairline seam where the image wraps around the sides. We don't actually want to reach -180 because it's the same as +180. (Might not be an issue at higher subdivisions >= 900)
+
+    dst = imgquery[0]
+    nbrs = imgquery[1]
+    # print(type(dst))
+    # print(type(nbrs))
 
     time_start = time.perf_counter()
-    # ToDo: This is slow. Speed it up. Problem: numba hates the tree object.
-    # Maybe somehow I could do an Enumerate instead? As with all of my problems, the hard part is quickly filling the arrays with the data to begin with, not the computations on the data once the arrays are already full.
-    # There may also be some sort of benefit to pre-calculating the nearest N neighbors for each lat/lon into their own array in the background?
-    # (in the future when there's enough stuff going on that there is even time for backgrond processing)
-    # Loop through Latitude starting at north pole. Pixels are filled per row.
-    for h in range(height):
-        # print(f"Starting row {h+1}")
-        # print("Lat:", lat)
-        # Loop through each Longitude per latitude.
-        for w in range(width):
-            # print("Lon:", lon)
-            # if lat == -90:
-            #     print("Lon:", lon)
-            # Query result[0] is distances, result[1] is vert IDs
-            # ToDo: I wonder if there is any notable difference to using 2 vars instead of 1 (like distances, neighbors = yadda instead of neighbors = yadda)
-            # ToDo: Query can accept an array of points to query which may be faster than doing one point at a time. It could also then be done outside of the function and passed as an array, which would allow @njit decorating construct_map_export
-            # How to get a weighted average for vertex colors:
-            # https://math.stackexchange.com/questions/3817854/formula-for-inverse-weighted-average-smaller-value-gets-higher-weight
-            d, nbr = tree.query(latlon2xyz(max(lat - (h * latpercent), -90), max(lon - (w * lonpercent), -180)), 3, workers=1)
-            sd = sum(d)
-            # Add a tiny amount to each i to (hopefully) prevent NaN and div by 0 errors
-            ws = [1 / ((i+0.00001) / sd) for i in d]  # ToDo: Variable names that make sense
-            t = sum(ws)
-            u = [i/t for i in ws]  # Inverted weights
-            value = int(sum([colors[nbr[i]]*f for i, f in enumerate(u)]))
-
-            map_array[h][w] = [value, value, value]
-
-#    print("The map array is now:", map_array)
+    pixels = make_m_array(width, height, dst, nbrs, colors)
     time_end = time.perf_counter()
-    print(f"Finished sampling in {time_end - time_start :.5f} sec")
-    return map_array
+    print(f"  Pixels built in   {time_end - time_start :.5f} sec")
+
+    return pixels  # ToDo: For the future, with multiple maps saved at once, maybe return a dict with the map name/type, and the array.
 
 # ToDo: Support for saving images with higher bit depths
 # and maybe additional formats (tiff, exr, etc).
@@ -183,6 +244,8 @@ def image_to_array(image_file):
         sys.exit(-1)
     return data
 
+# =============================================
+
 # ToDo: Get user Y/N confirmation for large meshes (might actually do this back in main before calling this)
 # - And MAYBE add support for multiple output formats (e.g. ply, obj, etc)
 # - Add support for exporting vertex color? But which data to use? Height?
@@ -194,7 +257,7 @@ def image_to_array(image_file):
 # However Maya uses a Y-up coordinate system by default so everything's rotated
 # but vert order is properly preserved and rotation or coordinate system can be
 # changed within Maya.
-def save_mesh(verts, tris, path, name, format=None):
+def save_mesh(verts, tris, path, name, fmt=None):
     """Save the planet as a 3D mesh that can be used in other software."""
     # meshio mesh
     # mesh = mi.Mesh(points, cells)
@@ -207,14 +270,15 @@ def save_mesh(verts, tris, path, name, format=None):
 
 # ToDo: Implement this.  ply format, maybe obj? obj supports vertex data only?
 # https://info.vercator.com/blog/what-are-the-most-common-3d-point-cloud-file-formats-and-how-to-solve-interoperability-issues
-def save_point_cloud(verts, path, name, format=None):
+def save_point_cloud(verts, path, name, fmt=None):
     """Save the planet as a point cloud that can be used in other software."""
     print("Not implemented yet.")
 
-# ToDo: Implement this. Output as a json or txt file or something.
-def save_settings(object, path, name, format=None):
+def save_settings(data, path, name, fmt=None):
     """Save the variables that will recreate this planet."""
-    print("Not implemented yet.")
+    out_path = os.path.join(path, f"{name}.{fmt}")
+    with open(out_path, "w") as f:
+        json.dump(data, f, indent=4)
 
 # ToDo: Implement this.
 def load_settings(path):
@@ -296,7 +360,8 @@ def sort_adjacency(adj):
         visited = np.full(6, -1, dtype=np.int32)
         pv = idx
         nv = adj[idx][0]
-        for i in prange(4):  # First 12 verts have connectivity 5
+        # First 12 verts have connectivity 5
+        for i in prange(4):
             visited[i] = nv
             nv = next_vert(pv, adj[idx], adj[nv])
             pv = visited[i]
@@ -307,7 +372,8 @@ def sort_adjacency(adj):
         visited = np.full(6, -1, dtype=np.int32)
         pv = idx
         nv = adj[idx][0]
-        for i in prange(5):  # All remaining verts have connectivity 6
+        # All remaining verts have connectivity 6
+        for i in prange(5):
             visited[i] = nv
             nv = next_vert(pv, adj[idx], adj[nv])
             pv = visited[i]
