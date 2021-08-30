@@ -20,6 +20,18 @@ from util import xyz2latlon, rescale
 #   This might prove helpful, although it's for processing images: https://github.com/MightyBOBcnc/speculative-koppen Maybe it can be adapted to icosphere, and more than 2 months.
 #   https://en.wikipedia.org/wiki/Climate_classification and https://en.wikipedia.org/wiki/Biome
 #   worldengine might also have some useful code in whatever is the most up-to-date fork. https://github.com/MightyBOBcnc/worldengine
+#
+# https://earthobservatory.nasa.gov/features/Water/page2.php
+#   "the total amount of water vapor in the atmosphere remains approximately the same over time.
+#    However, over the continents, precipitation routinely exceeds evaporation, and conversely, over the oceans, evaporation exceeds precipitation."
+#
+# ToDo: Not just rain, but frozen types of precipitation as well, and mixes (snow, sleet, etc.)
+# ToDo: Not just evaporation, not just transpiration from plants, but also sublimation in colder regions.
+# ToDo: Eventually perhaps take volcanic emissions into account.
+# ToDo: Maybe an air quality index?  e.g. for tracking saharan-like dust storms, volcanoes, and forest fires?  lol, even pollen during spring.
+# ToDo: I'd like to be able to determine areas on the planet that are most likely to experience severe weather (I'm mainly interested in thunderstorms but hurricanes, monsoons, extreme winds, and blizzards are also okay to do).
+#   I imagine that a combination of humidity and temperature could produce a crude map like this.  Add in wind speed and atmospheric pressure to improve accuracy.  Maybe also a rate of exchange between air and land (precip and evap) with areas of high exchange.
+
 @njit(cache=True, parallel=True, nogil=True)
 def assign_temp(verts, altitudes):
     """Assign starting surface temperatures based on equatorial distance and altitude."""
