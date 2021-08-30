@@ -22,7 +22,7 @@ def create_mesh(divisions):
     # Blender's ico has options for point, edge, or face up. Point up always
     # puts a pentagon at the N & S pole. Edge up behaves like meshzoo.
     #
-    # Obtain count of components starting from k:
+    # Obtain count of components starting from divisions:
     #   Verts is (k^2 * 10) + 2
     #   Edges is k^2 * 30
     #   Tris is k^2 * 20
@@ -77,12 +77,13 @@ def latlon2xyz(lat, lon, r=1):
 # ToDo: Need to take a closer look at the shape of the data that is acceptable for this function
 # because I've had some weird issues with numba not wanting to compile the return values
 # if the array wasn't flattened before being set to rescale()
-# ToDo: Check for divide by 0 errors in the logic.
+# ToDo: Prevent accidental div by 0 errors by checking to see if x_range is 0 and doing a sys.exit if it is.
 # ToDo: This could possibly be faster with prange.
 # ToDo: If "mid" is supplied, then rescale the upper and lower values separately. (rescale with two ranges, lower to mid, and mid to upper)
+# ToDo: Absolute value scaling support. E.G. If the supplied array is exactly 0 to 1, then each 0.00113019 would scale to approximately 10 meters if our absolute max is Mt Everest at 8848 meters.
 @njit(cache=True)
 def rescale(x, lower, upper, mid=None, mode=None):
-    """Re-scale (normalize) a list, x, to a given lower and upper bound."""
+    """Re-scale (normalize) an array, x, to a given lower and upper bound."""
     if mode is None:
         if mid is None:
             x_min = np.min(x)
@@ -90,20 +91,19 @@ def rescale(x, lower, upper, mid=None, mode=None):
             x_range = x_max - x_min
             new_range = upper - lower
             return np.array([((a - x_min) / x_range) * new_range + lower for a in x])
-            # ToDo: should this function even have a return value? Will we ever need the unmodified values? This can just operate on the input x array and replace its values?
-            #   Yes, there are times when we want a return value, like when we're rescaling to export a png; we don't want the original data to be modified there.
         else:
             print("Rescale upper and lower values separately.")
     if mode is not None:
         if mid is None:
             print("ERROR: Must supply a middle value to use rescale modes.")  # ToDo: Maybe raise an exception instead
+            sys.exit(0)
         elif mode == 'lower':
             x_min = np.min(x)
             x_max = np.max(x)
             midval = mid * x_max
             x_range = midval - x_min
             # new_range = upper - lower
-            new_range = 0 - lower  # The upper value for rescaling the lower values becomes 0  NOTE: Hold up, I think opensimplex might be returning values in the range 0 to 1, not -1 to +1
+            new_range = 0 - lower  # The upper value for rescaling the lower values becomes 0  NOTE: Hold up, my sample_noise4 is returning values from 0 to 1, not -1 to +1 because of the way I add 1 to values.
             for a in prange(len(x)):
                 if x[a] <= midval:
                     x[a] = ((x[a] - x_min) / x_range) * new_range + lower
@@ -178,20 +178,24 @@ def make_m_array(width, height, dists, nbrs, colors):
             ws = np.array([1 / ((i+0.00001) / sd) for i in dists[h][w]], dtype=np.float64)  # weights
             t = np.sum(ws)  # Total sum of weights
             iw = np.array([i/t for i in ws], dtype=np.float64)  # Inverted weights
-            value = int(np.sum(np.array([colors[nbrs[h][w][i]]*iw[i] for i in range(len(iw))])))
+            value = int(np.sum(np.array([colors[nbrs[h][w][i]]*iw[i] for i in range(len(iw))])))  # ToDo: If I add support for floating point image formats like EXR or HDR then this can't be an int.
 
+            # ToDo: Support for setting channel values individually instead of all the same.
             map_array[h][w] = [value, value, value]
     return map_array
 
-def build_image_data(imgquery, colors=None):  # Could rename this to like make_image_data
-    """Use KD-Tree to sample vertices and build a map for export."""
+def build_image_data(imgquery, colors=None):  # Could rename this to like make_image_data (my naming conventions are not unitform, some functions are "make_", some are "build_", and some are "create_"; make_ would be shortest)
+    """Use KD-Tree results to sample vertices and build a map for export.
+    imgquery -- Array/list that holds the KD Tree distance and neighbor arrays.
+    colors -- A dict of numpy arrays. Keys are names, arrays hold the data.
+    """
     # ToDo: In the future I might have a vert array with vertex colors that
     # aren't in a separate height array so I'll need to add a verts argument or
     # something, and an index for which sub-array holds the vertex colors.
     # (This is why colors=None, in case it isn't passed, but hasn't been handled yet..)
     # Also need support for RGB arrays or RGBA if A stores a mask like rivers.
     # Possible improvements include averaging up to 6 neighbors if lat/lon is
-    # directly on a vertex.
+    # directly on a vertex. (if dist to 1 vert is <= some tiny number)
 
     with open("options.json", "rt") as f:
         o = f.read()
@@ -203,23 +207,37 @@ def build_image_data(imgquery, colors=None):  # Could rename this to like make_i
 
     dst = imgquery[0]
     nbrs = imgquery[1]
-    # print(type(dst))
-    # print(type(nbrs))
+    result = {}
 
-    time_start = time.perf_counter()
-    pixels = make_m_array(width, height, dst, nbrs, colors)
-    time_end = time.perf_counter()
-    print(f"  Pixels built in   {time_end - time_start :.5f} sec")
+    if not isinstance(colors, dict):
+        print("ERROR: Must pass a dict when saving out texture maps.")  # ToDo: Better error handling.
 
-    return pixels  # ToDo: For the future, with multiple maps saved at once, maybe return a dict with the map name/type, and the array.
+    for key, array in colors.items():
+        time_start = time.perf_counter()
+        pixels = make_m_array(width, height, dst, nbrs, array)
+        time_end = time.perf_counter()
+        print(f"  {key} pixels built in   {time_end - time_start :.5f} sec")
+        result[key] = pixels
+
+    return result
 
 # ToDo: Support for saving images with higher bit depths
 # and maybe additional formats (tiff, exr, etc).
 def save_image(data, path, name):
-    """Save a numpy array as an image file."""
-    out_path = os.path.join(path, f"{name}.png")
-    img = Image.fromarray(data.astype('uint8'))
-    img.save(out_path)
+    """Save a numpy array as an image file.
+    data -- A dict. The key will be appended to the end of the file name.
+    path -- The path to the folder where the file will be saved.
+    name -- File name without extension. Final output will be name_key.ext"""
+    # Retrieve file extension from Nixis options.json
+    with open("options.json", "rt") as f:
+        o = f.read()
+    options = json.loads(o)
+    fmt = options["img_format"]
+
+    for key, array in data.items():
+        out_path = os.path.join(path, f"{name}_{key}.{fmt}")
+        img = Image.fromarray(array.astype('uint8'))
+        img.save(out_path)
 
 # ToDo: Validate that we can import 16-bit data and keep it that way instead of converting to 8-bit
 # Read an image into an array
@@ -285,6 +303,11 @@ def load_settings(path):
     """Load planet variables from a saved file."""
     print("Not implemented yet.")
 
+# ToDo: Implement this.
+def save_log(path, name, fmt=None):
+    """Save a verbose debug log to a text file."""
+    print("Not implemented yet.")
+
 # ToDo: Implement this. I'm thinking sqlite if there's a good python library.
 # https://sqlite.org/whentouse.html
 def export_planet(data, path, name):
@@ -302,13 +325,6 @@ def find_first(item, vec):
     return -1
 
 # ToDo: This is pretty fast for k=2500 but maybe try multithreading later.
-# Could make a secondary function that just returns the index position and the
-# value and then multithread map that and do the actual setting of the values
-# in the adj array in build_adjacency like the make_square test.py example.
-# vert = t[0]
-# idx = find_first(-1, adj[vert])
-# val = t[1]
-# return vert, idx, val
 @njit(cache=True)
 def build_adjacency(triangles):
     """Build an array of adjacencies for each mesh vertex."""
@@ -316,7 +332,7 @@ def build_adjacency(triangles):
     # 6th number we assign -1 as there's no such thing as a vert with ID of -1
     adj = np.full((int((len(triangles)+4)/2), 6), -1, dtype=np.int32)
 
-    for t in triangles:
+    for t in triangles:  # for i in prange(len(triangles)):
         # v0 = t[0]
         # v1 = t[1]
         # v2 = t[2]
@@ -327,9 +343,9 @@ def build_adjacency(triangles):
         # adj[v1][i1] = v2
         # adj[v2][i2] = v0
 
-        adj[t[0]][find_first(-1, adj[t[0]])] = t[1]
-        adj[t[1]][find_first(-1, adj[t[1]])] = t[2]
-        adj[t[2]][find_first(-1, adj[t[2]])] = t[0]
+        adj[t[0]][find_first(-1, adj[t[0]])] = t[1]  # adj[triangles[i][0]][find_first(-1, adj[triangles[i][0]])] = triangles[i][1]  # Ugly as sin but I think this would work for prange
+        adj[t[1]][find_first(-1, adj[t[1]])] = t[2]  # adj[triangles[i][1]][find_first(-1, adj[triangles[i][1]])] = triangles[i][2]
+        adj[t[2]][find_first(-1, adj[t[2]])] = t[0]  # adj[triangles[i][2]][find_first(-1, adj[triangles[i][2]])] = triangles[i][0]
     # print(triangles)
     # print(adj)
     return adj
