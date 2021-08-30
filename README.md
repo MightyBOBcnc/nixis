@@ -19,7 +19,7 @@ Important settings are stored in the options.json file in the main directory. Wh
 {
     "save_folder": "output",     # Name of the folder where exports are saved (this folder is created in the main directory)
     "img_width": 2048,           # Width of exported images (It is recommended that this be 2x the height)
-    "img_height": 1024,          # Height of exported images (it is recommended that this be 0.5x the width)
+    "img_height": 1024,          # Height of exported images (It is recommended that this be 0.5x the width)
     "img_format": "png",         # Format of exported images (In theory any format supported by Pillow should work)
     "bit_depth": 8,              # Bit-depth per channel of exported images
     "export_list": {},           # A dict of which maps should be exported (e.g. height, temperature, biome, etc.)
