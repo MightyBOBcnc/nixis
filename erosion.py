@@ -8,12 +8,13 @@ from util import *
 # ToDo:
 # Split erosion into functions by type.
 #   A function for hydraulic/fluvial erosion.  https://en.wikipedia.org/wiki/Fluvial_processes
-#   A function for thermal erosion (gravity/slope erosion)
-#   A function for INVERSE thermal as described in "Procedurally Generating Terrain - mics2011_submission_30.pdf"
-#   A function for aeolian (wind) eroosion
+#     Shallow Water Simulation is another name to look up for papers. (A simplification of Navier Stokes equations?)
+#   A function for thermal erosion (gravity/slope erosion) (NOTE: Deserts have stronger thermal weathering due to the extreme day/night temperature swings expanding/contracting stone.)
+#   A function for INVERSE thermal? As described in "Procedurally Generating Terrain - mics2011_submission_30.pdf"
+#   A function for aeolian (wind) eroosion? (NOTE: The effects of such erosion are likely very small at the scale Nixis works at)
 #   A function for glacial erosion
-#   A function for ocean beach erosion
-#   A function for ocean current (ocean floor) erosion
+#   A function for ocean/sea/lake beach erosion
+#   A function for ocean current (ocean floor) erosion (NOTE: The deeper a water body is, the less erosion there is at the floor. This is because water flow is extremely slow at high depths. Sediment capacity is enormous, however.)
 # Function for making a graph of river flow
 #   Use graph for svg output of rivers
 #   Use graph for grouping/splitting/showing individual water sheds
@@ -166,14 +167,31 @@ def erode_terrain3(nodes, neighbors, heights, num_iter=1, snapshot=None):
     water = np.zeros_like(heights)  # ToDo: Dtypes!  Save RAM?!
     sediment = np.zeros_like(heights)  # ToDo: Dtypes!  Save RAM?!
 
+    if snapshot is not None:
+        my_dir = os.path.dirname(os.path.abspath(__file__))
+        with open("options.json", "rt") as f:  # ToDo: Handle error if the file does not exist
+            options = json.load(f)
+        save_dir = os.path.join(my_dir, options["save_folder"], "snapshots")
+        try:  # ToDo: Test if the directory already exists. Maybe even attempt to see if we have write permission beforehand.
+            os.mkdir(save_dir)
+        except:
+            # ToDo: Actual exception types
+            # print("Failed to create script output directory!")
+            pass
+
     for i in range(num_iter):
         print("  Erosion pass:", i+1,"of", num_iter)
         rain_amount = 0.3 / 320# * random.random()
         water += rain_amount
         erosion_iteration3(nodes, neighbors, heights, water, sediment)
 
-        if snapshot is not None:
-            print("I didn't implement snapshotting yet")
+        if snapshot is not None:  #ToDo: This is quite slow.  Also it's a dumb hack.
+            dictionary = {}
+            rescaled_h = rescale(heights, 0, 255)  #NOTE: Due to the relative nature of rescale, if the min or max height changes then the scale will be messed up.
+            dictionary[f"{i+1:03d}"] = rescaled_h
+
+            pixel_data = build_image_data(snapshot, dictionary)
+            save_image(pixel_data, save_dir, "erosion_snapshot")
 
 # Attempting Travis Archer's description of hydraulic erosion combined with the race condition fix described by Axel Paris.
 # Procedurally Generating Terrain - mics2011_submission_30.pdf
