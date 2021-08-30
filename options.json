@@ -1,11 +1,12 @@
 {
     "save_folder": "output",
-	"img_width": 2048,
+    "img_width": 2048,
     "img_height": 1024,
     "img_format": "png",
     "bit_depth": 8,
+    "export_list": {},
     "mesh_format": "obj",
-	"point_format": "ply",
-	"settings_format": "json",
-	"database_format": "sqlite3"
+    "point_format": "ply",
+    "settings_format": "json",
+    "database_format": "sqlite3"
 }
