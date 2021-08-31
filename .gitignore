@@ -9,6 +9,10 @@ output/
 # Project settings
 .vscode/
 
+# Numba cache
+*.nbc
+*.nbi
+
 # C extensions
 *.so
 
