@@ -45,8 +45,9 @@ from climate import assign_temp
 #    Use the latlon2xyz to make a grid from a min/max lat and lon, then build the triangulated connectivity basically the same way Sebastian Lague does it. With enough octaves the opensimplex will have detail down to that level.
 #    Things like terrain resources (metal deposits, stone type, etc.) and temperature/precipitation have pretty slow interpolations at planet scale so these could just be a nearest neighbor search from a KD-Tree of the main icosphere.
 #    Erosion would be the hard part, because the grid mesh would have distorted area, wouldn't it? That's the whole problem with lat/lon representations of a sphere.  Unless we grab a proper curved slice from 3D where the sides bow
-#    and aren't perfect vertical/horizontal lat/lon lines.  A lower-resolution erosion from the icosphere could be KD-Tree'd onto the new grid as a starting point for elevations, and THEN sample opensimplex at higher resolution?
-#    Using point sampling on the new grid in an uneven fashion (uneven in proportion to lat/lon, so more dense at the bottom, less dense at the top) could maybe produce and "even" representation for an erosion graph.
+#    and aren't perfect vertical/horizontal lat/lon lines.  A lower-resolution erosion from the icosphere could be KD-Tree'd onto the new grid as a starting point for elevations, interpolated, and THEN sample opensimplex at higher resolution?
+#    Using point sampling on the new grid in an uneven fashion (uneven in proportion to lat/lon, so more dense at the bottom, less dense at the top) could maybe produce an "even" representation for an erosion graph.
+#    An alternative might be to take a lat/lon slice of the meshzoo icosasphere of some N division level, then subdivide the edges to make new triangles are higher resolution and use those for the same type of erosion graph that we're already doing.
 # - Fun, but distant, idea: Calculate zones that are likely to have high presence of fossils. In theory this should be doable once I'm tracking the types of rock in the ground, the sediment, the water distribution, and plant growth as a proxy for life/death.
 
 def main():
@@ -107,19 +108,19 @@ def main():
     else:
         world_name = str(world_seed) + "_" + str(divisions)
 
-    if args.radius:  # ToDo: I wonder if it's proper to do like "planet_radius = args.radius or 1.0" to save a few lines of code
-        planet_radius = args.radius
-    else:
-        # planet_radius = 6378100  # Actual earth radius in meters
-        planet_radius = 1.0  # In meters
+    if args.radius:  # ToDo: I wonder if it's proper to do like "world_radius = args.radius or 1.0" to save a few lines of code
+        world_radius = args.radius
+    else:  # NOTE: Technically speaking I should do the same as I did for divisions and simply set a default in argparse and ot have this if/else statement at all.
+        # world_radius = 6378100  # Actual earth radius in meters
+        world_radius = 1.0  # In meters
 
     my_dir = os.path.dirname(os.path.abspath(__file__))
     with open("options.json", "rt") as f:  # ToDo: Handle error if the file does not exist
-        o = f.read()
-    options = json.loads(o)
+        options = json.load(f)
     img_width = options["img_width"]
     img_height = options["img_height"]
     save_dir = os.path.join(my_dir, options["save_folder"])
+    export_list = options["export_list"]
 
     KDT = None
     test_latlon = False
@@ -143,7 +144,7 @@ def main():
         "world_name": world_name,
         "world_seed": world_seed,
         "divisions": divisions,
-        "planet_radius": planet_radius
+        "world_radius": world_radius
     }
 
     save_settings(world_preset, save_dir, world_name + '_settings', fmt=options["settings_format"])
@@ -155,8 +156,8 @@ def main():
     print(f"Script started at: {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}")
 
     points, cells = create_mesh(divisions)
-    if planet_radius != 1:
-        points *= planet_radius
+    if world_radius != 1:
+        points *= world_radius
 
     # print("Points:")
     # print(points)
@@ -205,7 +206,8 @@ def main():
     time_end = time.perf_counter()
     print(f"Time to init permutation arrays:   {time_end - time_start :.5f} sec")
 
-    # Ocean altitude is a *relative* percent of the max altitude
+    # Ocean altitude is a *relative* percent (expressed as a decimal) of the max altitude
+    # e.g. 0.4 would set the ocean to 40% of the height from the min to max altitude.
     alt_ocean = 0.4
     n_strength = 0.2
     n_roughness = 1.5
@@ -216,6 +218,7 @@ def main():
     # 2. then choose sea level as a percent between the min and max
     # 3. For only heights above that sea level, rescale so that the max altitude is something reasonable (taking into account that a max height in 'absolute' m or km has to be scaled down to the sphere radius)
     # 4. Do the same for heights below that sea level and some determined min value
+    # For reference, Mt. Everest is ~8848.86 m above sea level, the lowest land is the Dead Sea at -428 m below sea level, and the Mariana Trench has a depth of at least -10984 m below sea level.
     print("Sampling noise...")
 
 #    height = sample_octaves(points, None, perm, pgi, 2, n_roughness, n_strength, n_persistence, alt_ocean)
@@ -224,14 +227,14 @@ def main():
 
 #    height3 = sample_octaves(points, height2, perm, pgi, 2, 1.5, 0.5, 0.25, 0.25)
 
-#    height = sample_noise4(points, perm, pgi, n_roughness, n_strength, planet_radius)
+#    height = sample_noise4(points, perm, pgi, n_roughness, n_strength, world_radius)
 
     ha_start = time.perf_counter()
-    heighta = sample_noise4(points, perm, pgi, 1.6 / planet_radius, 0.4 / planet_radius, planet_radius)
+    heighta = sample_noise4(points, perm, pgi, 1.6 / world_radius, 0.4 / world_radius, world_radius)
     hb_start = time.perf_counter()
-    heightb = sample_noise4(points, perm, pgi, 5 / planet_radius, 0.2 / planet_radius, planet_radius)
+    heightb = sample_noise4(points, perm, pgi, 5 / world_radius, 0.2 / world_radius, world_radius)
     hc_start = time.perf_counter()
-    heightc = sample_noise4(points, perm, pgi, 24 / planet_radius, 0.02 / planet_radius, planet_radius)
+    heightc = sample_noise4(points, perm, pgi, 24 / world_radius, 0.02 / world_radius, world_radius)
     h_end = time.perf_counter()
     print(f"Total noise function runtime:   {hb_start - ha_start :.5f} sec")
     print(f"Total noise function runtime:   {hc_start - hb_start :.5f} sec")
@@ -247,6 +250,9 @@ def main():
 
     print("  min:", minval)
     print("  max:", maxval)
+
+    if args.png and not do_erode:
+        export_list["height"] = height
 
 # Erode! 
 # ToDo: Which came first, the erosion or the climate? Maybe do climate first, as the initial precipitation determines erosion rates. 
@@ -276,6 +282,9 @@ def main():
 
         # print(newheight)
 
+        if args.png:
+            export_list["height"] = height
+
 # Climate Stuff
 # =============================================
     if do_climate:
@@ -287,6 +296,9 @@ def main():
             temps = assign_temp(points, height)
         temp_end = time.perf_counter()
         print(f"Assign temps runtime: {temp_end-temp_start:.5f} sec")
+
+        if args.png:
+            export_list["temp"] = temps
 
 
 # Build KD Tree (and test query to show points on surface)
@@ -310,18 +322,20 @@ def main():
 # =============================================
     if args.png:
         print("Saving world map image...")
-        # print("before heights:", height)
-        f_rescale = rescale(height, 0, 255)
-        # print("after heights: ", np.round(f_rescale.astype(int)))
-        # ToDo: This needs rework to support saving more than one image type at a time (height, temp, etc.) while reusing the LL map.
-        # pixels = build_image_data(img_width, img_height, KDT, f_rescale.astype(int))
-        pixels = build_image_data(img_query_data, f_rescale)  # ToDo: Maybe feed in a dict like build_image_data, and it returns a dict of arrays.
+
+        for key, array in export_list.items():
+            # print("before heights:", height)
+            export_list[key] = rescale(array, 0, 255)
+            # print("after heights: ", np.round(f_rescale.astype(int)))
+
+        pixel_data = build_image_data(img_query_data, export_list)
         save_start = time.perf_counter()
-        save_image(pixels, save_dir, world_name)  # ToDo: Maybe like a dict is fed into build_image_data, and it returns a dict of arrays.  Then, for key, array in DictName: save_image(pixels, save_dir, world_name)
+        save_image(pixel_data, save_dir, world_name)
         save_end = time.perf_counter()
         print(f"Write to disk finished in  {save_end - save_start :.5f} sec")
 
-        pixels = None
+        img_query_data = None
+        pixel_data = None
 
 # Visualize the final planet
 # =============================================
@@ -332,75 +346,15 @@ def main():
     # ToDo: PyVista puts execution 'on hold' while it visualizes. After the user closes it execution resumes.
     # Consider asking the user right here if they want to save out the result as a png/mesh/point cloud.
     # (Only if those options weren't passed as arguments at the beginning, else do that arg automatically and don't ask)
-    # (There's also a PyVista mode that runs in the background and can be repeatedly updated, look into that.)
+    # (There's also a PyVista mode that runs in the background and can be repeatedly updated? Look into that.)
 
-# @njit  # Doesn't work because of the OpenSimplex object
-def sample_noise1(verts, perm, pgi, n_roughness=1, n_strength=0.2):
-    """Sample a simplex noise for given vertices"""
-    time_start = time.perf_counter()
-
-    elevations = np.ones((len(verts), 1))
-
-    time_el = time.perf_counter()
-
-    # for v in range(len(verts)):
-        # x, y, z = verts[v][0] * n_roughness, verts[v][1] * n_roughness, verts[v][2] * n_roughness
-        # point = osi.noise3d(x, y, z, perm, pgi) * n_strength + 1
-    for v, vert in enumerate(verts):
-        x, y, z = vert[0] * n_roughness, vert[1] * n_roughness, vert[2] * n_roughness
-        elevations[v] = osi.noise3d(x, y, z, perm, pgi) * n_strength + 1
-
-    time_end = time.perf_counter()
-
-    print(f"Time to initialize np.ones:     {time_el - time_start :.5f} sec")
-    print(f"Time to sample noise:           {time_end - time_el :.5f} sec")
-    print(f"Total noise function runtime:   {time_end - time_start :.5f} sec")
-
-    # print("Elevations:")
-    # print(elevations)
-    return elevations
-
-def sample_noise2(verts, perm, pgi, n_roughness=1, n_strength=0.2):
-    time_start = time.perf_counter()
-
-    rough_verts = verts * n_roughness
-    elevations = np.array([[osi.noise3d(v[0], v[1], v[2], perm, pgi) * n_strength + 1] for v in rough_verts])
-
-    # value = noise.pnoise2(noise_x, noise_y, octaves, persistence, lacunarity, random.randint(1, 9999))
-
-    # rand_seed = np.ones((noise_x.size, ))   # just for comparison
-    # value = np.array([noise.pnoise2(x, y, octaves, persistence, lacunarity, r) for x, y, r in zip(noise_x.flat, noise_y.flat, rand_seed)])
-    # return value.reshape(noise_x.shape)
-
-    time_end = time.perf_counter()
-
-    print(f"Total noise function runtime:   {time_end - time_start :.5f} sec")
-    return elevations
-
-def sample_noise3(verts, perm, pgi, n_roughness=1, n_strength=0.2):
-    time_start = time.perf_counter()
-
-    rough_verts = verts * n_roughness
-    elevations = np.array([[osi.noise3d(v[0], v[1], v[2], perm, pgi)] for v in rough_verts]) * n_strength + 1
-
-    time_end = time.perf_counter()
-
-    print(f"Total noise function runtime:   {time_end - time_start :.5f} sec")
-    return elevations
 
 @njit(cache=True, parallel=True, nogil=True)
 def sample_noise4(verts, perm, pgi, n_roughness=1, n_strength=0.2, radius=1):
     """Sample a simplex noise for given vertices"""
     elevations = np.ones(len(verts))
 
-    # It's faster to make another pre-multiplied array than it is to do:
-    # osi.noise3d(vert[0]*n_roughness, vert[1]*n_roughness, vert[2]*n_roughness, perm, pgi)
-    # For k=900 it only takes 0.1s to multiply, but 5.0s the other way.
     rough_verts = verts * n_roughness
-
-    # Older method
-    # for v, vert in enumerate(rough_verts):
-    #     elevations[v] = osi.noise3d(vert[0], vert[1], vert[2], perm, pgi)
 
     for v in prange(len(rough_verts)):
         elevations[v] = osi.noise3d(rough_verts[v][0], rough_verts[v][1], rough_verts[v][2], perm, pgi)
@@ -408,6 +362,7 @@ def sample_noise4(verts, perm, pgi, n_roughness=1, n_strength=0.2, radius=1):
     # print("Pre-elevations:")
     # print(elevations)
     return (elevations + 1) * 0.5 * n_strength * radius  # NOTE: Adding 1 to elevations is neutralizing all of the negative values.
+
 
 def sample_octaves(verts, elevations, perm, pgi, n_octaves=1, n_roughness=3, n_strength=0.2, n_persistence=0.5, alt_ocean=0.4):
     if elevations is None:
@@ -439,92 +394,15 @@ def sample_octaves(verts, elevations, perm, pgi, n_octaves=1, n_roughness=3, n_s
 
 def sample_noiseX(verts, elevations, perm, pgi, n_roughness=1, n_amp=1.0):
     """Sample a simplex noise for given vertices"""
-    time_start = time.perf_counter()
-
-    # It's faster to make another pre-multiplied array than it is to do:
-    # osi.noise3d(vert[0]*n_roughness, vert[1]*n_roughness, vert[2]*n_roughness, perm, pgi)
-    # For k=900 it only takes 0.1s to multiply, but 5.0s the other way.
     rough_verts = verts * n_roughness
-    time_noise = time.perf_counter()
+
     for v, vert in enumerate(rough_verts):
         elevations[v] = (osi.noise3d(vert[0], vert[1], vert[2], perm, pgi) + 1) * 0.5 * n_amp
 
-    time_end = time.perf_counter()
     rough_verts = None
 
-    print(f"Time to multiply n_roughness:     {time_noise - time_start :.5f} sec")
-    print(f"Time to sample noise:           {time_end - time_noise :.5f} sec")
-    print(f"Total noise function runtime:   {time_end - time_start :.5f} sec")
     return elevations
 
-# Disappointing. Multithreading does improve the sample time but does not
-# Combine with numba-fied opensimplex at all. In fact it's WORSE than
-# plain numba-fied opensimplex.
-def sample_noise5(verts, world_seed=0, n_roughness=1, n_strength=0.2):
-    tmp = OpenSimplex(seed=world_seed)
-    elevations = np.ones((len(verts), 1))
-    rough_verts = verts * n_roughness
-
-    # Observation: When threads=16 and chunks=500 you get about the same runtime
-    # as threads=8 and chunks=1000 (~63 seconds)
-    # Chunks of 100 doesn't perform well, and chunks of 10000 aren't great either
-    num_threads = 8
-    chunk_size = 1000
-
-    time_start = time.perf_counter()
-
-    stupid_workaround = np.full((len(verts), 1), tmp)
-
-    time_workaround = time.perf_counter()
-    # elevations *= tmp.noise3d([rough_verts[v][0],rough_verts[v][1],rough_verts[v][2] for v in rough_verts]) * n_strength + 1
-    #               [[tmp.noise3d(v[0],v[1],v[2])] for v in roughed_verts]
-
-#    potato = make_ranges(len(verts), num_threads)
-
-    #Process the rows in chunks in parallel
-    with concurrent.futures.ProcessPoolExecutor(num_threads) as executor:
-#        for row, result in executor.map(dumb_function, rough_verts, chunksize=100):
-#        executor.map(lambda v: onesample(tmp, n_strength, v), rough_verts)
-# =========
-        for row, result in executor.map(foursample, zip(rough_verts, stupid_workaround, range(len(rough_verts))), chunksize=chunk_size):
-            elevations[row] = result * n_strength + 1
-# =========
-#        executor.map(foursample, zip(rough_verts, stupid_workaround, range(len(rough_verts)), elevations), chunksize=chunk_size)
-
-    # for v, vert in enumerate(rough_verts):
-    #     onesample(elevations, tmp, v, vert, n_strength)
-
-    time_end = time.perf_counter()
-    print(f"Stupid workaround runtime:   {time_workaround - time_start :.5f} sec")
-    print(f"Total noise function runtime:   {time_end - time_start :.5f} sec")
-    return elevations
-
-def onesample(noise_object, n_strength, vert):
-    value = noise_object.noise3d(vert[0],vert[1],vert[2]) * n_strength + 1
-#    print("VALUE IS THIS THING:", value)
-    return value
-
-def twosample(arr, noise_object, n_strength, v):
-    value = noise_object.noise3d(arr[v][0],arr[v][1],arr[v][2]) * n_strength + 1
-#    print("VALUE IS THIS THING:", value)
-    return v, value
-
-def threesample(arr, noise_object, n_strength, vert):
-    index = arr.index(vert)
-    print("index:",index)
-    value = noise_object.noise3d(vert[0],vert[1],vert[2]) * n_strength + 1
-#    print("VALUE IS THIS THING:", value)
-    return index, value
-
-def foursample(x):
-    index = x[2]
-    value = x[1][0].noise3d(x[0][0],x[0][1],x[0][2])
-#    x[3][index] = value * 0.05 + 1
-    return index, value
-
-def dumb_function(i):
-    print("i is", i)
-    return 5
 
 def visualize(verts, tris, heights=None, search_point=None, neighbors=None):
     """Visualize the output."""
