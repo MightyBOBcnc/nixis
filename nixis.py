@@ -98,7 +98,7 @@ def main():
         print("World seed:", args.seed)
     else:
         seed_rng = np.random.default_rng()
-        world_seed = seed_rng.integers(low=0, high=999999)
+        world_seed = int(seed_rng.integers(low=0, high=999999))
         print("World seed:", world_seed)
         # rng = np.random.default_rng(i)
         # rng.random()
