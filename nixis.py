@@ -16,7 +16,7 @@ from scipy.spatial import KDTree
 import opensimplex as osi
 from util import *
 from erosion import *
-from climate import assign_temp
+from climate import assign_surface_temp
 # pylint: disable=not-an-iterable
 
 # ToDo List:
@@ -49,6 +49,10 @@ from climate import assign_temp
 #    Using point sampling on the new grid in an uneven fashion (uneven in proportion to lat/lon, so more dense at the bottom, less dense at the top) could maybe produce an "even" representation for an erosion graph.
 #    An alternative might be to take a lat/lon slice of the meshzoo icosasphere of some N division level, then subdivide the edges to make new triangles are higher resolution and use those for the same type of erosion graph that we're already doing.
 # - Fun, but distant, idea: Calculate zones that are likely to have high presence of fossils. In theory this should be doable once I'm tracking the types of rock in the ground, the sediment, the water distribution, and plant growth as a proxy for life/death.
+# - Utilize Logger and debug levels, and pray numba won't hate it. https://docs.python.org/3/library/logging.html
+#    https://www.reddit.com/r/learnpython/comments/ph9hp4/how_tiring_is_print_function_for_the_computer/ (useful tip: can use modulus to only record every X iterations, e.g. for i in range whatever, if i % 100 == 0: print(stuff))
+#    https://stackoverflow.com/questions/60077079/how-can-i-disable-numba-debug-logging-when-debug-env-variable-is-set
+# - Maybe some fancy progress bars. https://tqdm.github.io/
 
 def main():
     """Main function."""
@@ -66,7 +70,7 @@ def main():
     parser.add_argument("-s", "--seed", type=int, 
         help="A number used to seed the RNG. If not specified then a random \
         number will be used.")
-    parser.add_argument("-r", "--radius", 
+    parser.add_argument("-r", "--radius", type=float, 
         help="Planet radius in meters. Optional. Default is 1 meter with all \
         attributes scaled to fit.")
     parser.add_argument("--mesh", action="store_true", 
@@ -139,7 +143,7 @@ def main():
         # print("Failed to create script output directory!")
         pass
 
-    # Save the world preset
+    # Save the world preset  # ToDo: These files fill up the directory fast. Maybe only save if user passes an arg to save.
     world_preset = {
         "world_name": world_name,
         "world_seed": world_seed,
@@ -208,11 +212,12 @@ def main():
 
     # Ocean altitude is a *relative* percent (expressed as a decimal) of the max altitude
     # e.g. 0.4 would set the ocean to 40% of the height from the min to max altitude.
-    alt_ocean = 0.4
-    n_strength = 0.2
-    n_roughness = 1.5
-    n_persistence = 0.85
-    n_octaves = 3
+    ocean_percent = 0.55
+    n_init_rough = 1.5     # Initial roughness of first octave
+    n_init_strength = 0.4  # Initial strength of first octave
+    n_roughness = 2.5      # Multiply roughness by this much per octave
+    n_persistence = 0.5    # Multiply strength by this much per octave
+    n_octaves = 7          # Number of octaves
     # ToDo: Figure out elevation scaling.  Earth's avg radius is 6.3781 million meters (6378 km). We consider "0" to be sea level. So I need to:
     # 1. Get my heights in range -1 to +1 ? (This might not be required but might make step 3/4 more annoying than working with 0? Or not; the rescale process itself can reset the sea level to be the 0 altitude.)
     # 2. then choose sea level as a percent between the min and max
@@ -221,32 +226,49 @@ def main():
     # For reference, Mt. Everest is ~8848.86 m above sea level, the lowest land is the Dead Sea at -428 m below sea level, and the Mariana Trench has a depth of at least -10984 m below sea level.
     print("Sampling noise...")
 
-#    height = sample_octaves(points, None, perm, pgi, 2, n_roughness, n_strength, n_persistence, alt_ocean)
+    height = sample_octaves(points, None, perm, pgi, n_octaves, n_init_rough, n_init_strength, n_roughness, n_persistence, ocean_percent, world_radius)  # ToDo: Consider pulling these values from seed json file cuz this line is a long boi now.
 
 #    height2 = sample_octaves(points, height, perm, pgi, n_octaves, 2, 0.25, 0.5, 0.6)
 
 #    height3 = sample_octaves(points, height2, perm, pgi, 2, 1.5, 0.5, 0.25, 0.25)
 
-#    height = sample_noise4(points, perm, pgi, n_roughness, n_strength, world_radius)
+#    height = sample_noise4(points, perm, pgi, n_init_rough, n_init_strength, world_radius)
 
-    ha_start = time.perf_counter()
-    heighta = sample_noise4(points, perm, pgi, 1.6 / world_radius, 0.4 / world_radius, world_radius)
-    hb_start = time.perf_counter()
-    heightb = sample_noise4(points, perm, pgi, 5 / world_radius, 0.2 / world_radius, world_radius)
-    hc_start = time.perf_counter()
-    heightc = sample_noise4(points, perm, pgi, 24 / world_radius, 0.02 / world_radius, world_radius)
-    h_end = time.perf_counter()
-    print(f"Total noise function runtime:   {hb_start - ha_start :.5f} sec")
-    print(f"Total noise function runtime:   {hc_start - hb_start :.5f} sec")
-    print(f"Total noise function runtime:   {h_end - hc_start :.5f} sec")
+    # ha_start = time.perf_counter()
+    # heighta = sample_noise4(points, perm, pgi, 1.5 / world_radius, 0.4 / world_radius, world_radius)  # The strength value is straight multiplication, not a power, so by itself it has no effect on the noise; the effect of the strength is during addition of octaves.
+    # hb_start = time.perf_counter()
+    # heightb = sample_noise4(points, perm, pgi, 3.75 / world_radius, 0.2 / world_radius, world_radius)
+    # hc_start = time.perf_counter()
+    # heightc = sample_noise4(points, perm, pgi, 9.375 / world_radius, 0.1 / world_radius, world_radius)
+    # h_end = time.perf_counter()
+    # heightd = sample_noise4(points, perm, pgi, 23.4375 / world_radius, 0.05 / world_radius, world_radius)
+    # heighte = sample_noise4(points, perm, pgi, 58.59375 / world_radius, 0.025 / world_radius, world_radius)
+    # heightf = sample_noise4(points, perm, pgi, 146.484375 / world_radius, 0.0125 / world_radius, world_radius)
+    # heightg = sample_noise4(points, perm, pgi, 366.2109375 / world_radius, 0.00625 / world_radius, world_radius)
+    # print(f"Total noise function runtime:   {hb_start - ha_start :.5f} sec")
+    # print(f"Total noise function runtime:   {hc_start - hb_start :.5f} sec")
+    # print(f"Total noise function runtime:   {h_end - hc_start :.5f} sec")
 
-    height = (heighta + heightb + heightc) * 0.4
+    # height = (heighta + heightb + heightc)# * 0.4  # Multiplying by a non-power strength number appears to be irrelevant when we do a rescale afterward. The rescale determines the heights.
+    #height = heighta
+#    height = (heighta + heightb + heightc + heightd + heighte + heightf + heightg)
+
+    height = rescale(height, -0.05, 0.15)
+#    height = rescale(height, -4000, 8850)
+#    height = rescale(height, -4000, 0, 0, mode='lower')
+#    height = rescale(height, 0, 8850, 0, mode='upper')
 
     minval = np.amin(height)
     maxval = np.amax(height)
-    ocean_percent = 0.5 * maxval
+    # https://math.stackexchange.com/questions/2110160/find-percentage-value-between-2-numbers
+    # ocean_level = minval + ((maxval - minval) * 50 / 100)  # If I want to input percentage as an integer between 0 and 100 we need the divide by 100 step
+    ocean_level = minval + ((maxval - minval) * ocean_percent)  # Or this way to just input a decimal percent. NOTE: Due to the way np.clip works, values less than 0% or greater than 100% have no effect.
 
-    # height = np.clip(height, ocean_percent, maxval)
+    # height *= 10
+    # height += 6378100
+    # height += 400000
+
+    height = np.clip(height, ocean_level, maxval)
 
     print("  min:", minval)
     print("  max:", maxval)
@@ -255,9 +277,9 @@ def main():
         export_list["height"] = height
 
 # Erode! 
-# ToDo: Which came first, the erosion or the climate? Maybe do climate first, as the initial precipitation determines erosion rates. 
+# ToDo: Which came first, the erosion or the climate? Maybe do climate first, as the initial precipitation determines erosion rates.
 #   Temperature also determines evaporation rate which affects how much erosion we can do.
-#   And if we're being fancy with Thermal Erosion instead of approximating then we need temps first.
+#   And if we're being fancy with Thermal Erosion instead of approximating then we need surface temps first.
 #   However then the altitude-based temperature will be wrong, so, climate has to run again after erosion. (Really they probably need to alternate)
 # =============================================
     if do_erode:
@@ -291,14 +313,14 @@ def main():
         print("Assigning starting temperatures...")
         temp_start = time.perf_counter()
         if snapshot_climate:
-            temps = assign_temp(points, height)  # ToDo: When climate sim actually has steps, implement snapshotting
+            surface_temps = assign_surface_temp(points, height)  # ToDo: When climate sim actually has steps, implement snapshotting
         else:
-            temps = assign_temp(points, height)
+            surface_temps = assign_surface_temp(points, height)
         temp_end = time.perf_counter()
-        print(f"Assign temps runtime: {temp_end-temp_start:.5f} sec")
+        print(f"Assign surface temps runtime: {temp_end-temp_start:.5f} sec")
 
         if args.png:
-            export_list["temp"] = temps
+            export_list["surface_temp"] = surface_temps
 
 
 # Build KD Tree (and test query to show points on surface)
@@ -341,7 +363,7 @@ def main():
 # =============================================
     print("Preparing visualization...")
 #    visualize(noise_vals, cells, height, search_point=llpoint, neighbors=neighbors)
-    visualize(points * (np.reshape(height, (len(points), 1)) + 1), cells, height)
+    visualize(points * (np.reshape(height, (len(points), 1)) + 1), cells, height)  # NOTE: Adding +1 to height means values only grow outward if range is 0-1. But for absolute meter ranges it merely throws the values off by 1.
 
     # ToDo: PyVista puts execution 'on hold' while it visualizes. After the user closes it execution resumes.
     # Consider asking the user right here if they want to save out the result as a png/mesh/point cloud.
@@ -361,20 +383,21 @@ def sample_noise4(verts, perm, pgi, n_roughness=1, n_strength=0.2, radius=1):
 
     # print("Pre-elevations:")
     # print(elevations)
-    return (elevations + 1) * 0.5 * n_strength * radius  # NOTE: Adding 1 to elevations is neutralizing all of the negative values.
+    return (elevations + 1) * 0.5 * n_strength * radius  # NOTE: I'm not sure if multiplying by the radius is the proper thing to do in my next implementation.
+    # return elevations
 
 
-def sample_octaves(verts, elevations, perm, pgi, n_octaves=1, n_roughness=3, n_strength=0.2, n_persistence=0.5, alt_ocean=0.4):
+def sample_octaves(verts, elevations, perm, pgi, n_octaves=1, n_init_roughness=1.5, n_init_strength=0.4, n_roughness=2.0, n_persistence=0.5, ocean_percent=0.5, world_radius=1.0):
     if elevations is None:
-        elevations = np.ones((len(verts), 1))
-    n_freq = 1.0  # Frequency
-    n_amp = 1.0  # Amplitude
-    n_ocean = alt_ocean / n_octaves
+        elevations = np.zeros(len(verts))
+    n_freq = n_init_roughness  # Frequency
+    n_amp = n_init_strength  # Amplitude
     # In my separate-sampling experiment, rough/strength pairs of (1.6, 0.4) (5, 0.2) and (24, 0.02) were good for 3 octaves
     # The final 3 results were added and then multiplied by 0.4
     for i in range(n_octaves):
-        print(f"Octave {i+1}..")
-        elevations = elevations + sample_noiseX(verts, elevations, perm, pgi, n_freq, n_amp)
+        print(f"  Octave {i+1}..")
+        # sample_noiseX(verts, elevations, perm, pgi, n_freq, n_amp)
+        elevations += sample_noise4(verts, perm, pgi, n_freq / world_radius, n_amp / world_radius, world_radius)
 
         n_freq *= n_roughness
         n_amp *= n_persistence
@@ -384,24 +407,26 @@ def sample_octaves(verts, elevations, perm, pgi, n_octaves=1, n_roughness=3, n_s
     time_nmax = time.perf_counter()
     emax = np.amax(elevations)
     time_end = time.perf_counter()
-    print(f"Time to find numpy min: {time_nmax - time_nmin :.5f} sec")
-    print(f"Time to find numpy max: {time_end - time_nmax :.5f} sec")
-    print("min:", emin)
-    print("max:", emax)
-    ocean_percent = alt_ocean * emax
-    return np.clip(elevations, ocean_percent, emax) * n_strength
-    # return elevations * n_strength
+    print(f"  Time to find numpy min: {time_nmax - time_nmin :.5f} sec")
+    print(f"  Time to find numpy max: {time_end - time_nmax :.5f} sec")
+    print("  min:", emin)
+    print("  max:", emax)
+    return elevations
 
+
+@njit(cache=True, parallel=True, nogil=True)
 def sample_noiseX(verts, elevations, perm, pgi, n_roughness=1, n_amp=1.0):
     """Sample a simplex noise for given vertices"""
     rough_verts = verts * n_roughness
 
-    for v, vert in enumerate(rough_verts):
-        elevations[v] = (osi.noise3d(vert[0], vert[1], vert[2], perm, pgi) + 1) * 0.5 * n_amp
+#    for v, vert in enumerate(rough_verts):
+#        elevations[v] += (osi.noise3d(vert[0], vert[1], vert[2], perm, pgi) + 1) * 0.5 * n_amp
+    for v in prange(len(rough_verts)):
+        elevations[v] += (osi.noise3d(rough_verts[v][0], rough_verts[v][1], rough_verts[v][2], perm, pgi) + 1) * 0.5 * n_amp
 
-    rough_verts = None
+#    rough_verts = None
 
-    return elevations
+#    return elevations
 
 
 def visualize(verts, tris, heights=None, search_point=None, neighbors=None):
@@ -415,7 +440,7 @@ def visualize(verts, tris, heights=None, search_point=None, neighbors=None):
     tri_size = np.full((len(tris), 1), 3)
     new_tris = np.hstack((tri_size, tris))
     time_end = time.perf_counter()
-    print(f"Time to resize triangle array: {time_end - time_start :.5f} sec")
+    print(f"Time to reshape triangle array: {time_end - time_start :.5f} sec")
 
     # pyvista mesh
     mesh = pv.PolyData(verts, new_tris)
@@ -432,7 +457,7 @@ def visualize(verts, tris, heights=None, search_point=None, neighbors=None):
     # by cleverly using the below_color for anything below what we clip here.
     minval = np.amin(heights)
     maxval = np.amax(heights)
-    heights = np.clip(heights, minval*1.001, maxval)
+    # heights = np.clip(heights, minval*1.001, maxval)
 
     # https://matplotlib.org/cmocean/
     # https://docs.pyvista.org/examples/02-plot/cmap.html
