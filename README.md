@@ -11,6 +11,7 @@ While there are many existing tools (such as [Gaea](https://quadspinner.com/), [
 ## What This Project *Is Not*
 * A fully scientific planetary simulation is not the goal of this project.  Shortcuts and approximations are used for the sake of simplicity and performance.  As long as the output of the program looks *plausibly* realistic it need not be perfectly realistic or fully scientific for our purposes.
 * Nor is it a goal to be able to view a planet at resolutions from orbital altitudes to ground level.  This tool is not for creating playable maps for video games.  Its explicit goal is to create textures, that will wrap onto spheres for visualization, which do not have the resolution to be playable at ground level.  These textures are intended to be viewed from orbital distances. 
+* Flat worlds, disc worlds, ring worlds, and terrains that wrap in both the X and Y direction need not apply.  There are many tools that can already cater to those styles.  Nixis is for spherical planets.
 
 -----
 ## options.json
