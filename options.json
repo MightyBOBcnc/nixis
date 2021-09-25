@@ -3,7 +3,7 @@
     "img_width": 2048,
     "img_height": 1024,
     "img_format": "png",
-    "bit_depth": 8,
+    "bit_depth": 16,
     "export_list": {},
     "mesh_format": "obj",
     "point_format": "ply",
