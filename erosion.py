@@ -14,12 +14,18 @@ from util import *
 #   A function for aeolian (wind) eroosion? (NOTE: The effects of such erosion are likely very small at the scale Nixis works at)
 #   A function for glacial erosion
 #   A function for ocean/sea/lake beach erosion
-#   A function for ocean current (ocean floor) erosion (NOTE: The deeper a water body is, the less erosion there is at the floor. This is because water flow is extremely slow at high depths. Sediment capacity is enormous, however.)
+#   A function for ocean current (ocean floor) erosion 
+#     (NOTE: The deeper a water body is, the less erosion there is at the floor. This is because water flow is extremely slow at high depths. Sediment capacity is enormous, however.)
+#     https://en.wikipedia.org/wiki/Turbidite
 # Function for making a graph of river flow
 #   Use graph for svg output of rivers
 #   Use graph for grouping/splitting/showing individual water sheds
 # Track soil movement for nutrients and fertility (good places for plant growth)
+# NOTE: The USGS Landsat dataset tracking crop growth is beautiful. You can see the exact locations where all the fields for each crop type, which correlates with geography and soil fertility, of course. It's a data set you rarely see.
+#       Mostly one just thinks of crops generically at the state level. It's amazing to see the small localized areas for certain crops and realize that we're all depending on this small area for that crop (not counting imports, of course).
 # Salinity of water bodies (salt lakes, mainly)
+# This page is unrelated to erosion but I do want to try the 'virtual pipe' method, and this page mentions that the flow rate through a pipe is the square of the diameter? But it also says that if you increase the pressure it's the square root of pressure?
+# http://homework.uoregon.edu/pub/class/es202/GRL/dwh.html
 
 @njit(cache=True)
 def calc_slope(v0, v1, dist):
@@ -169,8 +175,7 @@ def erode_terrain3(nodes, neighbors, heights, num_iter=1, snapshot=None):
 
     if snapshot is not None:
         my_dir = os.path.dirname(os.path.abspath(__file__))
-        with open("options.json", "rt") as f:  # ToDo: Handle error if the file does not exist
-            options = json.load(f)
+        options = load_settings("options.json")
         save_dir = os.path.join(my_dir, options["save_folder"], "snapshots")
         try:  # ToDo: Test if the directory already exists. Maybe even attempt to see if we have write permission beforehand.
             os.mkdir(save_dir)
