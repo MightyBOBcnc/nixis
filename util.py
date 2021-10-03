@@ -72,6 +72,16 @@ def latlon2xyz(lat, lon, r=1):
     z = r * np.sin(lat*(np.pi/180))
     return (x, y, z)
 
+@njit(cache=True)
+def kelvin_to_c(k):
+    """Convert temperatures from Kelvin to Celsius."""
+    return k - 273.15
+
+@njit(cache=True)
+def c_to_kelvin(c):
+    """Convert temperatures from Celsius to Kelvin."""
+    return c + 273.15
+
 # https://stats.stackexchange.com/questions/351696/normalize-an-array-of-numbers-to-specific-range
 # https://learn.64bitdragon.com/articles/computer-science/data-processing/min-max-normalization
 # ToDo: Need to take a closer look at the shape of the data that is acceptable for this function
@@ -81,34 +91,70 @@ def latlon2xyz(lat, lon, r=1):
 # ToDo: This could possibly be faster with prange.
 # ToDo: If "mid" is supplied, then rescale the upper and lower values separately. (rescale with two ranges, lower to mid, and mid to upper)
 # ToDo: Absolute value scaling support. E.G. If the supplied array is exactly 0 to 1, then each 0.00113019 would scale to approximately 10 meters if our absolute max is Mt Everest at 8848 meters.
-@njit(cache=True)
-def rescale(x, lower, upper, mid=None, mode=None):
-    """Re-scale (normalize) an array, x, to a given lower and upper bound."""
+@njit(cache=True, parallel=True, nogil=True)
+def rescale(x, lower, upper, mid=None, mode=None, u_min=None, u_max=None):
+    """Re-scale (normalize) an array to a given lower and upper bound.
+    x -- The input array.
+    lower -- The desired new min value.
+    upper -- The desired new max value.
+    mid -- Optionally rescale the lower & upper values separately.
+    Mid should be between x's existing min and max values.
+    mode -- Optionally rescale ONLY the 'lower' or 'upper' values.
+    u_min -- Optionally specify an absolute value for x min.
+    u_max -- Optionally specify an absolute value for x max.
+    """
+    new_array = np.copy(x)
+
+    x_min = np.min(x)
+    x_max = np.max(x)
+
+    if u_min is not None and u_min < x_min:
+        x_min = u_min
+    if u_max is not None and u_max > x_max:
+        x_max = u_max
+
     if mode is None:
         if mid is None:
-            x_min = np.min(x)
-            x_max = np.max(x)
             x_range = x_max - x_min
             new_range = upper - lower
-            return np.array([((a - x_min) / x_range) * new_range + lower for a in x])
-        else:
-            print("Rescale upper and lower values separately.")
+
+            for a in prange(len(x)):
+                new_array[a] = ((x[a] - x_min) / x_range) * new_range + lower
+            return new_array
+
+        else:  # This is probably wrong.  In fact, giving it a second thought, can this branch even produce a different result than the first branch?
+#            # mid = x_min + (mid * (x_max + np.abs(x_min)))  # I have no idea if this is right
+#            mid = mid * (x_max + abs(x_min))  # Numba hates this for some reason, and it fails the whole compile
+            x_lower_range = mid - x_min
+            new_lower_range = mid - lower
+            x_upper_range = x_max - mid
+            new_upper_range = upper - mid
+            for a in prange(len(x)):
+                if x[a] <= mid:
+                    new_array[a] = ((x[a] - x_min) / x_lower_range) * new_lower_range + lower
+                else:
+                    new_array[a] = ((x[a] - mid) / x_upper_range) * new_upper_range + mid  # Not sure if substituting the mid value for the 'x_min' and 'lower' will produce proper results, but we'll see.
+            return new_array
+
     if mode is not None:
         if mid is None:
-            print("ERROR: Must supply a middle value to use rescale modes.")  # ToDo: Maybe raise an exception instead
-            sys.exit(0)
+            print("ERROR: Must supply a middle value to use rescale modes.")  # ToDo: Maybe raise an exception instead (actually I don't know if numba can handle that)
+            # sys.exit(0)
         elif mode == 'lower':
-            x_min = np.min(x)
-            x_max = np.max(x)
-            midval = mid * x_max
-            x_range = midval - x_min
-            # new_range = upper - lower
-            new_range = 0 - lower  # The upper value for rescaling the lower values becomes 0  NOTE: Hold up, my sample_noise4 is returning values from 0 to 1, not -1 to +1 because of the way I add 1 to values.
+            x_range = mid - x_min
+            new_range = mid - lower  # The upper value for rescaling the lower values becomes 0  NOTE: Hold up, my sample_noise4 is returning values from 0 to 1, not -1 to +1 because of the way I add 1 to values.
             for a in prange(len(x)):
-                if x[a] <= midval:
-                    x[a] = ((x[a] - x_min) / x_range) * new_range + lower
+                if x[a] <= mid:
+                    new_array[a] = ((x[a] - x_min) / x_range) * new_range + lower
+            return new_array
+
         elif mode == 'upper':
-            print("lol, implement me plz")
+            x_range = x_max - mid
+            new_range = upper - mid
+            for a in prange(len(x)):
+                if x[a] >= mid:
+                    new_array[a] = ((x[a] - mid) / x_range) * new_range + mid  # Not sure if substituting the mid value for the 'x_min' and 'lower' will produce proper results, but we'll see.
+            return new_array
 
 
 def make_ranges(arr_len, threads):
@@ -172,6 +218,8 @@ def make_m_array(width, height, dists, nbrs, colors):
 
     for h in prange(height):
         for w in prange(width):
+            # ToDo: For certain maps like a B&W land/water mask, or the tectonic plate map I might actually want hard borders without the anti-aliased smoothing of averages along the edges.
+            # For this perhaps I could have the function take an argument like 'AA' for anti-aliashed.  If True, use the weighted distance logic. Else use a different logic. Maybe even split the logics out to different functions.
             # https://math.stackexchange.com/questions/3817854/formula-for-inverse-weighted-average-smaller-value-gets-higher-weight
             sd = np.sum(dists[h][w])  # Sum of distances
             # Add a tiny amount to each i to (hopefully) prevent NaN and div by 0 errors
@@ -180,7 +228,7 @@ def make_m_array(width, height, dists, nbrs, colors):
             iw = np.array([i/t for i in ws], dtype=np.float64)  # Inverted weights
             value = int(np.sum(np.array([colors[nbrs[h][w][i]]*iw[i] for i in range(len(iw))])))  # ToDo: If I add support for floating point image formats like EXR or HDR then this can't be an int.
 
-            # ToDo: Support for setting channel values individually instead of all the same.
+            # ToDo: Support for setting channel values individually instead of all the same. Possibly as sub-functions depending on performance and flow/structure.
             map_array[h][w] = [value, value, value]
     return map_array
 
@@ -197,9 +245,7 @@ def build_image_data(imgquery, colors=None):  # Could rename this to like make_i
     # Possible improvements include averaging up to 6 neighbors if lat/lon is
     # directly on a vertex. (if dist to 1 vert is <= some tiny number)
 
-    with open("options.json", "rt") as f:
-        o = f.read()
-    options = json.loads(o)
+    options = load_settings("options.json")
     width = options["img_width"]
     height = options["img_height"]
 
@@ -222,16 +268,22 @@ def build_image_data(imgquery, colors=None):  # Could rename this to like make_i
     return result
 
 # ToDo: Support for saving images with higher bit depths
-# and maybe additional formats (tiff, exr, etc).
+#    and maybe additional formats (tiff, exr, etc).
+# ToDo: Attach metadata to saved images such as:
+#   'Generated with Nixis: [link to github]
+#   Area per pixel at the equator.
+#   The scale of the data, e.g. the min and max height value, or temp, etc.
+#   Maybe the basic seed values of seed, divisions, and radius
+#   Maybe even steganography for funsies. https://www.thepythoncode.com/article/hide-secret-data-in-images-using-steganography-python
+# EXIF and steganography will obviously not work with all image formats, so, research what metadata can be stored on what formats.
+# ToDo: Support for user-defined unit scales? (e.g. save temps as C or F? I'm not sure if that would be visually different.)
 def save_image(data, path, name):
     """Save a numpy array as an image file.
     data -- A dict. The key will be appended to the end of the file name.
     path -- The path to the folder where the file will be saved.
     name -- File name without extension. Final output will be name_key.ext"""
     # Retrieve file extension from Nixis options.json
-    with open("options.json", "rt") as f:
-        o = f.read()
-    options = json.loads(o)
+    options = load_settings("options.json")
     fmt = options["img_format"]
 
     for key, array in data.items():
@@ -264,9 +316,10 @@ def image_to_array(image_file):
 
 # =============================================
 
-# ToDo: Get user Y/N confirmation for large meshes (might actually do this back in main before calling this)
-# - And MAYBE add support for multiple output formats (e.g. ply, obj, etc)
+# ToDo:
+# - MAYBE add better support for multiple output formats (e.g. ply, obj, etc)
 # - Add support for exporting vertex color? But which data to use? Height?
+# - And consider binary vs ASCII formats for file size and import performance.
 # It should be noted that Blender's obj importer will change the vertex order
 # by default and won't match the vert order from meshzoo's points/cells arrays.
 # This is not a problem with Blender's ply importer.
@@ -275,21 +328,36 @@ def image_to_array(image_file):
 # However Maya uses a Y-up coordinate system by default so everything's rotated
 # but vert order is properly preserved and rotation or coordinate system can be
 # changed within Maya.
-def save_mesh(verts, tris, path, name, fmt=None):
+def save_mesh(verts, tris, path, name):
     """Save the planet as a 3D mesh that can be used in other software."""
+    if len(tris) > 3000000:  # 3 million is a somewhat arbitrary choice
+        print("\n" + f"ATTENTION. This mesh has {len(tris):,} triangles. \
+            Your 3D modeling software may not be able to open/edit it." + "\n")
+        confirm = input("Continue anyway? Y/N: ")
+        if confirm.lower() not in ('y', 'yes'):
+            print("A smaller division setting will reduce the number of tris.")
+            return
+
+    options = load_settings("options.json")
+    fmt = options["mesh_format"]
+
     # meshio mesh
     # mesh = mi.Mesh(points, cells)
     print("Saving mesh to disk...")
     time_start = time.perf_counter()
-    out_path = os.path.join(path, f"{name}.obj")
+    out_path = os.path.join(path, f"{name}.{fmt}")
     mi.write_points_cells(out_path, verts, {"triangle": tris})
     time_end = time.perf_counter()
     print(f"Mesh saved in {time_end - time_start :.5f} sec")
 
 # ToDo: Implement this.  ply format, maybe obj? obj supports vertex data only?
 # https://info.vercator.com/blog/what-are-the-most-common-3d-point-cloud-file-formats-and-how-to-solve-interoperability-issues
-def save_point_cloud(verts, path, name, fmt=None):
+def save_point_cloud(verts, path, name):
     """Save the planet as a point cloud that can be used in other software."""
+
+    options = load_settings("options.json")
+    fmt = options["point_format"]
+
     print("Not implemented yet.")
 
 def save_settings(data, path, name, fmt=None):
@@ -298,10 +366,17 @@ def save_settings(data, path, name, fmt=None):
     with open(out_path, "w") as f:
         json.dump(data, f, indent=4)
 
-# ToDo: Implement this.
+# ToDo: Handle error better if the file does not exist; probably should include a try/except as well.
 def load_settings(path):
-    """Load planet variables from a saved file."""
-    print("Not implemented yet.")
+    """Load planet variables or Nixis options from a saved file."""
+    if os.path.exists(path):
+        with open(path, "rt") as f:
+            o = f.read()
+        options = json.loads(o)
+    else:
+        print("Path does not exist:", path)
+        sys.exit(0)
+    return options
 
 # ToDo: Implement this.
 def save_log(path, name, fmt=None):
