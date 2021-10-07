@@ -56,7 +56,11 @@ def create_mesh(divisions):
 @njit(cache=True)
 def xyz2latlon(x, y, z, r=1):
     """Convert 3D spatial XYZ coordinates into Latitude and Longitude."""
-    lat = np.degrees(np.arcsin(z / r))
+    # Old method; will output NaNs if Z > 1 or Z < -1
+    # lat = np.degrees(np.arcsin(z / r))
+
+    # Constrain the value to -1 to 1 before doing arcsin
+    lat = np.degrees(np.arcsin(min(max((z / r), -1), 1)))
     lon = np.degrees(np.arctan2(y, x))
 
 #    lat = math.asin(z / r)
