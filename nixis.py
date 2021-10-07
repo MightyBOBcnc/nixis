@@ -18,6 +18,7 @@ from util import *
 from erosion import *
 from climate import *
 # pylint: disable=not-an-iterable
+# pylint: disable=line-too-long
 
 # ToDo List:
 # - In the future when we have climate simulation, run a test to see if it's faster to lookup xyz2latlon as-needed or to simply store latlon for each vertex in a big master array.
@@ -314,72 +315,27 @@ def main():
 # =============================================
     if do_climate:
 
-        # ====================
-        # NOTE: Planetary average solar flux and balances
-
-        # SBC = 5.670374419 * 10**-8  # Stefan-Boltzmann constant
-        # 0.00000005670374419
-
         # Calculate the solar constant at the planet's orbit
         tsi = calculate_tsi(star_radius, star_temp, orbital_distance)
 
-        # https://earthobservatory.nasa.gov/features/EnergyBalance/page1.php
-        # TSI is at the top of the atmosphere. For Earth that's about 1370 watts per meter squared (W/m^2)
-        # Because only half of the planet is lit, this immediately cuts that number in half.
-        # Because a sphere isn't evenly lit (cosine falloff with latitude and longitude), this is cut in half again.
-        # So, when averaged over the whole planet the incoming energy is 0.25 * TSI or ~ 342.5 W/m^2
-        # But in addition to that some simply bounces away because of albedo. About 31% bounces away. 342 * (1 - 0.31) or 236.325 W/m^2 (note: I've seen sources say albedo is 29% to 31%)
-        # 22% gets absorbed by the atmosphere by water vapor, dust, and ozone, and 47% gets absorbed by the surface. (so of the 69% that doesn't bounce, about 31.8% is absorbed in the atmosphere and 68.2% by the surface)
+        # Calculate equilibrium temperature for the planet
+        # calc_planet_equilibrium(tsi, world_albedo)
 
-        earth_radius = 6378100.0  # NOTE: Manually keying this in for now because something is weird/wrong with visualizing the temperatures on a full-sized planet at the moment so I'm visualizing at radius 1.0 for the time being.
-
-        planet_cross_section = np.pi * earth_radius**2
-        planet_surface_area = 4 * np.pi * earth_radius**2  # Sunlight only falls on half of the surface area, however
-
-        # ToDo: energy at the cross section, energy reduced by albedo, and maybe energy that bounces off the atmosphere? not sure if that's the same thing.  or maybe I meant absorbed by the atmosphere so it doesn't reach ground.
-        # For basic temp assignment, I could start by calculated the airless body temperature and then just multiply by a fudge factor for greenhouse effect. (e.g. earth is like 34 C higher than it would be with no atmospheric blanket)
-        # Basic energy balance in/out
-        total_energy = tsi * planet_cross_section  # Total energy of the planet cross-section, in W
-        energy_in = tsi * 0.25 * (1 - world_albedo)  # Energy in after factoring out albedo bounce and spherical geometry, in W/m^2
-        atmosphere_watts = energy_in * 0.318  # After factoring out albedo bounce, this is how much the atmosphere absorbs in W/m^2
-        surface_watts = energy_in * 0.682  # After factoring out albedo bounce, this is how much the surface absorbs in W/m^2
-
-        # These values would probably be derived from the gas/aerosol composition of the atmosphere (I think the open source "Thrive" by Revolutionary Games does this; e.g. calculating light blockage via its wavelength in nanometers vs size of molecules)
-        # Amount of incoming shortwave light frequencies that makes it down through the atmosphere
-        shortwave_transmittance = 0.9
-        # Amount of outgoing longwave IR frequencies that makes it out through the atmosphere
-        longwave_transmittance = 0.16
-
-        # There is a mismatch with what's written on the linked GHG1 page below
-        # and what needs to be done. There is some poor/sloppy phrasing.
-        # DON'T raise this to the power of 0.25. What looks like an earlier
-        # version confirms this: http://homework.uoregon.edu/pub/class/es202/atm.html
-        ground_flux = tsi * ((1 + shortwave_transmittance) / (1 + longwave_transmittance))  # Simple way to fudge atmospheric greenhouse blanket effect
-
-        # Okay this equation here was a bit hard to figure out but its the
-        # average surface temp for the whole planet without atmospherics.
-        # The source is at the bottom of the following page:
-        # http://homework.uoregon.edu/pub/class/es202/GRL/ghg1.html
-        avg_surface_temp_unmodified = (tsi / (4*SBC))**0.25 * (1 - world_albedo)**0.25
-        # Same but with atmospheric fudge plugged in
-        avg_surface_temp_greenhouse = (ground_flux / (4*SBC))**0.25 * (1 - world_albedo)**0.25
-
-        print("--   Star surface energy:", SBC * star_temp**4 * (4 * np.pi * star_radius**2))  # ToDo: Move this print into the calculate_tsi function.  (Also really need debug log levels to control verbosity of printing.)
-        print("--                TSI is:", tsi)
-        print("--Cross-sectional energy:", total_energy)
-        print("--Ground flux is:        ", ground_flux)
-        print("--Original surface temp: ", avg_surface_temp_unmodified)
-        print("--Modified surface temp: ", avg_surface_temp_greenhouse)
+        # Calculate equilibrium temperature for a block of water
+        # calc_water_equilibrium(tsi)
 
         # ====================
         # NOTE: The original temperature assignment code
 
+        axial_tilt = 8.0
+        current_tilt = calculate_seasonal_tilt(axial_tilt, 90)
+
         print("Assigning starting temperatures...")
         temp_start = time.perf_counter()
         if snapshot_climate:
-            surface_temps = assign_surface_temp(points, height, axial_tilt, surface_watts)  # ToDo: When climate sim actually has steps, implement snapshotting
+            surface_temps = assign_surface_temp(points, height, current_tilt, tsi)  # ToDo: When climate sim actually has steps, implement snapshotting
         else:
-            surface_temps = assign_surface_temp(points, height, axial_tilt, surface_watts)
+            surface_temps = assign_surface_temp(points, height, current_tilt, tsi)
         temp_end = time.perf_counter()
         print(f"Assign surface temps runtime: {temp_end-temp_start:.5f} sec")
 
@@ -387,132 +343,29 @@ def main():
             export_list["surface_temp"] = surface_temps
 
         # ====================
-        # NOTE: Some material equilibrium code
+        # NOTE: Attempt 1 at spherical solar flux (hour angle stuff)
+        # calc_hour_angle_insolation(tsi)
 
-        edge_length = 1.0
-        volume = edge_length**3  # X cubic meters  # NOTE: Consider whether it would be more relevant to do this with circles with an area of 1 meter squared, and/or cylinders of material.
-        # volume = edge_length**2  # For water with a depth of only 1 meter
-        # surface_area = edge_length**2  # Allow only 1 side of the cube to radiate energy
-        surface_area = 6 * edge_length**2  # For a cube from edge length
-        # surface_area = 6 * volume**(2/3)  # For a cube from volume
-        # surface_area = (2*edge_length**2) + (4*edge_length)  # For water with a depth of only 1 meter
-        emissivity = 1.0  # Not the actual value for water but we're pretending it's a perfect black-body
-        water_mass = 1000 * volume  # water's density is 1000 kg/m^3
-        water_heat_cap = 4184  # Water's heat capacity is 4184 Joules/kg/K
-        water_albedo = 0.06
-
-        sim_steps = 10  # Max number of steps. Will break early if equilibrium is reached.
-        time_step = 3600  # W is J per second. This is the number of seconds for each step.
-        if time_step == 1:
-            time_units = "seconds"
-        elif time_step == 60:
-            time_units = "minutes"
-        elif time_step == 3600:
-            time_units = "hours"
-        elif time_step == 86400:
-            time_units = "days"
-        elif time_step == 604800:
-            time_units = "weeks"
-        else:
-            print("INVALID TIME STEP")
-            sys.exit(0)
-
-        # NOTE: There's an artifact if the starting temperature is above the eventual equilibrium temperature.
-        # The temperature might actually spike upwards before then descending down to equilibrium,
-        # or it might spike, then drop below equilibrium before rising to equilibrium.
-        # This is due to multiplying the time_step in the new amount of TSI to add to the joules.
-        # It causes a large sum of joules to be added initially before new_emit is calculated and
-        # subtracted in the subsequent step(s) if the step is large.
-        # Also, a large time_step can cause some of the variables to overflow because numbers get too big.
-        old_temp = 200.0  # I'm scared to start at 0 kelvin so we'll start at 1
-        old_joules = water_mass * water_heat_cap * old_temp# * time_step
-        old_emit = SBC * old_temp**4 * surface_area * emissivity# * time_step
-        print(" Water Temp is:", old_temp)
-        print(" Starting joules:", old_joules)
-        print(" Starting emit:", old_emit)
-
-        # Also we're ignoring that water becomes ice below 273 K, and ice has a different heat capacity, albedo, etc.
-        for i in range(sim_steps):  # Could do a while True
-            old_joules = old_joules - old_emit + (tsi * (1-water_albedo) * edge_length**2 * time_step)
-            # old_joules = old_joules - old_emit + (ground_flux * (1-water_albedo) * edge_length**2 * time_step)
-            # print(" joules is:", old_joules)
-
-            # From this page: https://www.e-education.psu.edu/earth103/node/1005
-            # joules = mass * heat capacity * temperature
-            # Therefore we can reverse engineer the temperature from joules / (mass * heat capacity)
-            new_temp = old_joules / (water_mass * water_heat_cap)
-            # print(" New temp:", new_temp)
-            new_emit = SBC * new_temp**4 * surface_area * emissivity * time_step
-            # print(" New emit:", new_emit)
-
-            if round(old_temp, 8) == round(new_temp, 8):  # This is not the best method. i.e. large masses of material will change temp very slowly so this rounding will break early right at the start because the temp barely changed.
-            # if old_temp == new_temp:
-                print(f" Equilibrium ~= {new_temp}")
-                break
-
-            old_temp = new_temp
-            old_emit = new_emit
-            # if i % 24 == 0:
-            print(f" Water Temp is: {new_temp:09.5f} at time step {i+1:.0f} {time_units}.")
-
-            # Can we simply calculate the equillibrium directly?
-            # water_mass * water_heat_cap * temperature = SBC * temperature**4 * surface_area * emissivity  # NOTE: This whole section is probably all kinds of wrong.
-            # water_mass * water_heat_cap * temperature = SBC * (temperature*temperature*temperature*temperature) * surface_area * emissivity
-            # water_mass * water_heat_cap = SBC * (temperature*temperature*temperature) * surface_area * emissivity
-            # (temperature*temperature*temperature) = (SBC * surface_area * emissivity) / (water_mass * water_heat_cap)
-            # temperature**3 = (SBC * surface_area * emissivity) / (water_mass * water_heat_cap)
-            # temperature = ((SBC * surface_area * emissivity) / (water_mass * water_heat_cap))**(1/3)
-
-
-        # ====================
-        # NOTE: Solar flux at specific latitude, time, and day of year
-
-        solstice = 173
-        year_length = 365.25
-        day_length = 24
-        half_day = day_length / 2
-
-        hour = 12
-        day = 80
-        latitude = 0
-        longitude = 0
-
-        axial_tilt = 23.44
-        current_tilt = calculate_seasonal_tilt(axial_tilt, 90)
-
-#        hour_angle = ( ((hour - half_day) * np.pi) / day_length ) + ((longitude * np.pi) / 180)
-        # hour_angle = 90
-        hour_angle = (360 / day_length) * (hour - half_day)  # In degrees
-
-        declination = current_tilt * (np.pi/180) * np.cos( (2*np.pi * (day - solstice)) / year_length )
-
-#        hour_angle = np.arccos(-np.tan(latitude) * np.tan(declination))# * np.pi/180
-
-        # zenith = ( np.sin(latitude * (np.pi/180)) * np.sin(declination) + np.cos(latitude * (np.pi/180)) ) * ( np.cos(declination) * np.cos(hour_angle) )
-        zenith = ( np.sin(latitude * (np.pi/180)) * np.sin(declination * (np.pi/180)) + np.cos(latitude * (np.pi/180)) ) * ( np.cos(declination * (np.pi/180)) * hour_angle )
-
-        flux = tsi * np.cos(zenith * (np.pi/180))# * longwave_transmittance
-        # flux = tsi * (1-world_albedo) * np.cos(zenith)# * longwave_transmittance
-
-        test = tsi * np.cos(np.abs(latitude - current_tilt) * (np.pi/180)) * np.cos(hour_angle * (np.pi/180))  # Not quite right; when hour is 12 and lat = 0 it should be at full strength
-
-        print(f"TSI is {tsi}")
-        print(f"Hour angle is {hour_angle}")
-        print(f"Declination angle is {declination}")
-        print(f"Zenith angle is {zenith}")
-        print(f"Flux at Lat: {latitude}, Lon: {longitude} at hour {hour} is: {flux}")
-        print(f"Test is {test}")
-        # ====================
         # NOTE: Attempt 2 at spherical solar flux.
-        temps_2 = assign_surface_temp5(points, height, current_tilt, surface_watts)
+        temps_2 = calc_daily_insolation(points, height, current_tilt, tsi)
         if args.png:
             export_list["surface_temp_2"] = temps_2
+
+        banana = calc_insolation_slice(world_radius, current_tilt, tsi, world_albedo)
+        # print(banana)
+        taco = calc_daily_insolation_2(points, height, current_tilt, banana, tsi)
+
+        # taco *= (tsi/360)  # Compared to the NASA data for 1980 this is off by like 20 Watts or so, but the cosine angle is basically perfect.
+        if args.png:
+            export_list["surface_temp_3"] = taco
+
+        # calc_equilibrium_temp()
 
 
 # Build KD Tree (and test query to show points on surface)
 # =============================================
     if test_latlon:
-        llpoint = latlon2xyz(-10, -18)
+        llpoint = latlon2xyz(20, 10)
         if KDT is None:
             KDT = build_KDTree(points)
 
@@ -553,8 +406,8 @@ def main():
     print(f"Script runtime: {runtime_end - runtime_start:.3f} seconds")
 
     print("Preparing visualization...")
-#    visualize(noise_vals, cells, height, search_point=llpoint, neighbors=neighbors)
-#    visualize(points * (np.reshape(height, (len(points), 1)) + 1), cells, height)  # NOTE: Adding +1 to height means values only grow outward if range is 0-1. But for absolute meter ranges it merely throws the values off by 1.
+#    visualize(points, cells, height, search_point=llpoint, neighbors=neighbors, tilt=current_tilt)
+#    visualize(points * (np.reshape(height, (len(points), 1)) + 1), cells, height, tilt=current_tilt)  # NOTE: Adding +1 to height means values only grow outward if range is 0-1. But for absolute meter ranges it merely throws the values off by 1.
 
     # NOTE: Adding +1 to height means values only grow outward if range is 0-1. But for absolute meter ranges it merely throws the values off by 1.
     # NOTE: Figure out the proper way to multiply points times the absolute heights to maintain the correct radius.
@@ -562,8 +415,8 @@ def main():
     # points *= np.reshape(height + 1 + world_radius - 1, (len(points), 1))  # So, not this way
 
     points *= np.reshape(height/world_radius + 1, (len(points), 1))  # Rather, do it this way instead
-    # visualize(points, cells, surface_temps, tilt=axial_tilt)
-    visualize(points, cells, temps_2, tilt=axial_tilt)
+    # visualize(points, cells, surface_temps, tilt=current_tilt)
+    visualize(points, cells, taco, tilt=current_tilt)
 
     # ToDo: PyVista puts execution 'on hold' while it visualizes. After the user closes it execution resumes.
     # Consider asking the user right here if they want to save out the result as a png/mesh/point cloud.
@@ -572,7 +425,7 @@ def main():
 
 # Cleanup
 # =============================================
-    # temp_path = os.path.join(my_dir, "temp." + options["settings_format"])
+    # temp_path = os.path.join(save_dir, world_name + '_config.' + options["settings_format"])
     # if os.path.exists(temp_path):
     #     os.remove(temp_path)
 
@@ -640,7 +493,8 @@ def visualize(verts, tris, heights=None, search_point=None, neighbors=None, tilt
 
     if search_point is not None and neighbors is not None:
         # Is it strictly necessary that these be np.arrays?
-        neighbor_dots = pv.PolyData(np.array([verts[neighbors[0]], verts[neighbors[1]], verts[neighbors[2]]]))
+#        neighbor_dots = pv.PolyData(np.array([verts[neighbors[0]], verts[neighbors[1]], verts[neighbors[2]]]))
+        neighbor_dots = pv.PolyData(neighbors)
         search_dot = pv.PolyData(np.array(search_point))
     x_axisline = pv.Line([-1.5,0,0],[1.5,0,0])
     y_axisline = pv.Line([0,-1.5,0],[0,1.5,0])
