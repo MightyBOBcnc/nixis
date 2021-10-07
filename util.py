@@ -10,6 +10,7 @@ import numpy as np
 from numba import njit, prange
 from scipy.spatial import KDTree
 # pylint: disable=not-an-iterable
+# pylint: disable=line-too-long
 
 
 def create_mesh(divisions):
@@ -124,7 +125,7 @@ def rescale(x, lower, upper, mid=None, mode=None, u_min=None, u_max=None):
 
         else:  # This is probably wrong.  In fact, giving it a second thought, can this branch even produce a different result than the first branch?
 #            # mid = x_min + (mid * (x_max + np.abs(x_min)))  # I have no idea if this is right
-#            mid = mid * (x_max + abs(x_min))  # Numba hates this for some reason, and it fails the whole compile
+#            mid = mid * (x_max + abs(x_min))  # Numba hates this for some reason, and it fails the whole compile; maybe just mid *= (x_max + abs(x_min))
             x_lower_range = mid - x_min
             new_lower_range = mid - lower
             x_upper_range = x_max - mid
@@ -138,7 +139,8 @@ def rescale(x, lower, upper, mid=None, mode=None, u_min=None, u_max=None):
 
     if mode is not None:
         if mid is None:
-            print("ERROR: Must supply a middle value to use rescale modes.")  # ToDo: Maybe raise an exception instead (actually I don't know if numba can handle that)
+            print("ERROR: Must supply a middle value to use rescale modes.")
+            # ToDo: Maybe raise an exception instead (actually I don't know if numba can handle that; the documentation says it can't do try/except, but it can do raise or assert)
             # sys.exit(0)
         elif mode == 'lower':
             x_range = mid - x_min
@@ -399,7 +401,7 @@ def find_first(item, vec):
     # Safety fallback (probably shouldn't ever happen)
     return -1
 
-# ToDo: This is pretty fast for k=2500 but maybe try multithreading later.
+# ToDo: This is already pretty fast for k=2500 but maybe try prange later.
 @njit(cache=True)
 def build_adjacency(triangles):
     """Build an array of adjacencies for each mesh vertex."""
@@ -445,6 +447,9 @@ def next_vert(v, arr1, arr2):
 # Takes about 5 seconds for a k=2500 mesh, otherwise would take ~10 seconds.
 # Note: This produces a proper 'cycle' for each vertex but the winding order
 # is not consistent; some are clockwise and some are counter-clockwise.
+# ToDo: Try to search for patterns in the vert order again. Maybe there might
+# be something like the winding order for even indexes is one way and the
+# order for odd indexes is the other way (probably not, but worth checking).
 @njit(cache=True, parallel=True, nogil=True)
 def sort_adjacency(adj):
     for idx in prange(12):
