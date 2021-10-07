@@ -1,8 +1,11 @@
 """Module of climate functions."""
+import os
+import sys
 import numpy as np
 from numba import njit, prange
-from util import xyz2latlon, rescale, load_settings
+from util import xyz2latlon, latlon2xyz, rescale, load_settings
 # pylint: disable=not-an-iterable
+# pylint: disable=line-too-long
 
 SBC = 5.670374419 * 10**-8  # Stefan-Boltzmann constant
 # 0.00000005670374419
@@ -13,7 +16,7 @@ SBC = 5.670374419 * 10**-8  # Stefan-Boltzmann constant
 # https://web.archive.org/web/20180210070117/http://www.kayelaby.npl.co.uk/general_physics/2_7/2_7_9.html
 # https://theengineeringmindset.com/specific-heat-capacity-of-materials/
 # https://www.researchgate.net/publication/245450023_Thermophysical_properties_of_seawater_A_review_of_existing_correlations_and_data
-HEAT_CAPACITY = {
+MAT_HEAT_CAPACITY = {
     "water": 4184, # At 25 C (262.15 k)
     "ice": 2008,
     "sea_water": 3989, # 3985 at 0 C, 3993 at 20 C.. but some sources say as low as 3850, or they say 3900...
@@ -36,7 +39,7 @@ HEAT_CAPACITY = {
 # http://www.antarcticglaciers.org/glaciers-and-climate/estimating-glacier-contribution-to-sea-level-rise/
 # https://www.climate-policy-watcher.org/energy-balance/density-of-snow-and-ice.html
 # https://www.engineeringtoolbox.com/specific-heat-capacity-d_391.html
-DENSITY = {
+MAT_DENSITY = {
     "water": 1000,
     "ice": 917,
     "sea_water": 1027,
@@ -56,8 +59,8 @@ DENSITY = {
 # https://nsidc.org/cryosphere/seaice/processes/albedo.html
 # https://en.wikipedia.org/wiki/Albedo
 # http://ponce.sdsu.edu/surface_albedo_and_water_resources.html Useful resource for aridity, moisture, runoff, and evaporation, too.
-# 
-ALBEDO = {
+#
+MAT_ALBEDO = {
     "water": 0.06,
     "ice": 0.6, # Said to vary between 0.5 and 0.7 depending on age, compactedness, dirtiness
     "sea_water": 0.06,
@@ -122,7 +125,7 @@ ALBEDO = {
 # ** https://www.uou.ac.in/lecturenotes/science/MSCGE-19/Insolation,%20Atmospheric%20temperature%20and%20Heat%20Budget%20of%20the%20Earth.pdf
 # * On and near the Solstices the summer pole actually receives MORE energy than anywhere else since there is 24 hours of daylight.
 # ** http://www.applet-magic.com/insolation.htm
-# * On an ordinary day, the insolation is proportional to the sine of the Sun's altitude. When the Sun is 30° above the horizon, the sunlight energy per square meter is half of what it is when the Sun is directly overhead. 
+# * On an ordinary day, the insolation is proportional to the sine of the Sun's altitude. When the Sun is 30° above the horizon, the sunlight energy per square meter is half of what it is when the Sun is directly overhead.
 # ** https://svs.gsfc.nasa.gov/4466
 # ToDo: Ocean water's huge volume and water's high specific heat capacity make it the dominant force in climate. The atmosphere is 'subservient' to the ocean.
 #
@@ -167,6 +170,8 @@ def calculate_seasonal_tilt(axial_tilt, degrees):
     degrees -- How far along is the planet in its orbit around its star?
     (between 0 and 360. 0/360 and 180 are equinoxes. 90 and 270 are solstices.)
     """
+    # NOTE: IRL the tilt of a planet doesn't actually change as it orbits.
+    # What does change is the *relative* angle of incoming sunlight.
     return np.sin(degrees * np.pi/180) * axial_tilt
 
 def calculate_tsi(star_radius, star_temp, orbital_distance):
@@ -177,6 +182,138 @@ def calculate_tsi(star_radius, star_temp, orbital_distance):
     # energy_at_planet = (SBC * star_temp**4 * star_radius**2) / (orbital_distance**2)  # Simplified equation
     # energy_at_planet is at the top of the atmosphere. For Earth that's about 1370 watts per meter squared (W/m^2)
     return energy_at_planet
+
+def calc_planet_equilibrium(flux, albedo):
+    """Calculate the equilibrium temperature for a whole planet."""
+    tsi = flux
+
+    # https://earthobservatory.nasa.gov/features/EnergyBalance/page1.php
+    # TSI is at the top of the atmosphere. For Earth that's about 1370 watts per meter squared (W/m^2)
+    # Because only half of the planet is lit, this immediately cuts that number in half.
+    # Because a sphere isn't evenly lit (cosine falloff with latitude and longitude), this is cut in half again.
+    # So, when averaged over the whole planet the incoming energy is 0.25 * TSI or ~ 342.5 W/m^2
+    # But in addition to that some simply bounces away because of albedo. About 31% bounces away. 342 * (1 - 0.31) or 236.325 W/m^2 (note: I've seen sources say albedo is 29% to 31%)
+    # 22% gets absorbed by the atmosphere by water vapor, dust, and ozone, and 47% gets absorbed by the surface. (so of the 69% that doesn't bounce, about 31.8% is absorbed in the atmosphere and 68.2% by the surface)
+
+    earth_radius = 6378100.0  # NOTE: Manually keying this in for now because something is weird/wrong with visualizing the temperatures on a full-sized planet at the moment so I'm visualizing at radius 1.0 for the time being.
+
+    planet_cross_section = np.pi * earth_radius**2
+    planet_surface_area = 4 * np.pi * earth_radius**2  # Sunlight only falls on half of the surface area, however
+
+    # ToDo: energy at the cross section, energy reduced by albedo, and maybe energy that bounces off the atmosphere? not sure if that's the same thing.  or maybe I meant absorbed by the atmosphere so it doesn't reach ground.
+    # For basic temp assignment, I could start by calculating the airless body temperature and then just multiply by a fudge factor for greenhouse effect. (e.g. earth is like 34 C higher than it would be with no atmospheric blanket)
+    # Basic energy balance in/out
+    total_energy = tsi * planet_cross_section  # Total energy of the planet cross-section, in W
+    energy_in = tsi * 0.25 * (1 - albedo)  # Energy in after factoring out albedo bounce and spherical geometry, in W/m^2
+    atmosphere_watts = energy_in * 0.318  # After factoring out albedo bounce, this is how much the atmosphere absorbs in W/m^2
+    surface_watts = energy_in * 0.682  # After factoring out albedo bounce, this is how much the surface absorbs in W/m^2
+
+    # These values would probably be derived from the gas/aerosol composition of the atmosphere (likely including water vapor but possibly not clouds as that's albedo?)
+    # (I think the open source "Thrive" by Revolutionary Games does this; e.g. calculating light blockage via its wavelength in nanometers vs size of molecules)
+    # Amount of incoming shortwave light frequencies that makes it down through the atmosphere
+    shortwave_transmittance = 0.9
+    # Amount of outgoing longwave IR frequencies that makes it out through the atmosphere
+    # As you can see, Earth's atmosphere blocks most outgoing IR radiation from the ground.
+    # It is absorbed by the atmosphere and then re-radiated away.
+    longwave_transmittance = 0.16
+
+    # There is a mismatch with what's written on the linked GHG1 page below
+    # and what needs to be done. There is some poor/sloppy phrasing.
+    # DON'T raise this to the power of 0.25. What looks like an earlier
+    # version confirms this: http://homework.uoregon.edu/pub/class/es202/atm.html
+    ground_flux = tsi * ((1 + shortwave_transmittance) / (1 + longwave_transmittance))  # Simple way to fudge atmospheric greenhouse blanket effect
+
+    # Okay this equation here was a bit hard to figure out but its the
+    # average surface temp for the whole planet without atmospherics.
+    # The source is at the bottom of the following page:
+    # http://homework.uoregon.edu/pub/class/es202/GRL/ghg1.html
+    avg_surface_temp_unmodified = (tsi / (4*SBC))**0.25 * (1 - albedo)**0.25
+    # Same but with atmospheric fudge plugged in
+    avg_surface_temp_greenhouse = (ground_flux / (4*SBC))**0.25 * (1 - albedo)**0.25
+
+    print("--                TSI is:", tsi)
+    print("--Cross-sectional energy:", total_energy)
+    print("--Ground flux is:        ", ground_flux)
+    print("--Original surface temp: ", avg_surface_temp_unmodified)
+    print("--Modified surface temp: ", avg_surface_temp_greenhouse)
+
+def calc_water_equilibrium(flux):
+    """Calculate the equilibrium temperature for a block of water."""
+    edge_length = 1.0
+    volume = edge_length**3  # X cubic meters  # NOTE: Consider whether it would be more relevant to do this with circles with an area of 1 meter squared, and/or cylinders of material.
+    # volume = edge_length**2  # For water with a depth of only 1 meter
+    # surface_area = edge_length**2  # Allow only 1 side of the cube to radiate energy
+    surface_area = 6 * edge_length**2  # For a cube from edge length
+    # surface_area = 6 * volume**(2/3)  # For a cube from volume
+    # surface_area = (2*edge_length**2) + (4*edge_length)  # For water with a depth of only 1 meter
+    emissivity = 1.0  # Not the actual value for water but we're pretending it's a perfect black-body. For actual values see: https://www.engineeringtoolbox.com/radiation-heat-emissivity-d_432.html
+    # emissivity = 0.955
+    water_mass = 1000 * volume  # water's density is 1000 kg/m^3
+    water_heat_cap = 4184  # Water's heat capacity is 4184 Joules/kg/K
+    water_albedo = 0.06
+
+    sim_steps = 10  # Max number of steps. Will break early if equilibrium is reached.
+    time_step = 3600  # W is J per second. This is the number of seconds for each step.
+    if time_step == 1:
+        time_units = "seconds"
+    elif time_step == 60:
+        time_units = "minutes"
+    elif time_step == 3600:
+        time_units = "hours"
+    elif time_step == 86400:
+        time_units = "days"
+    elif time_step == 604800:
+        time_units = "weeks"
+    else:
+        print("INVALID TIME STEP")
+        sys.exit(0)
+
+    # NOTE: There's an artifact if the starting temperature is above the eventual equilibrium temperature.
+    # The temperature might actually spike upwards before then descending down to equilibrium,
+    # or it might spike, then drop below equilibrium before rising to equilibrium.
+    # This is due to multiplying the time_step in the new amount of TSI to add to the joules.
+    # It causes a large sum of joules to be added initially before new_emit is calculated and
+    # subtracted in the subsequent step(s) if the step is large.
+    # Also, a large time_step can cause some of the variables to overflow because numbers get too big.
+    old_temp = 1.0  # I'm scared to start at 0 kelvin so we'll start at 1
+    old_joules = water_mass * water_heat_cap * old_temp# * time_step
+    old_emit = SBC * old_temp**4 * surface_area * emissivity# * time_step
+    print(" Water Temp is:", old_temp)
+    print(" Starting joules:", old_joules)
+    print(" Starting emit:", old_emit)
+
+    # Also we're ignoring that water becomes ice below 273 K, and ice has a different heat capacity, albedo, etc.
+    for i in range(sim_steps):  # Could do a while True
+        old_joules = old_joules - old_emit + (flux * (1-water_albedo) * edge_length**2 * time_step)
+        # print(" joules is:", old_joules)
+
+        # From this page: https://www.e-education.psu.edu/earth103/node/1005
+        # joules = mass * heat capacity * temperature
+        # Therefore we can reverse engineer the temperature from joules / (mass * heat capacity)
+        new_temp = old_joules / (water_mass * water_heat_cap)
+        # print(" New temp:", new_temp)
+        new_emit = SBC * new_temp**4 * surface_area * emissivity * time_step
+        # print(" New emit:", new_emit)
+
+        if round(old_temp, 8) == round(new_temp, 8):  # This is not the best method. i.e. large masses of material will change temp very slowly so this rounding will break early right at the start because the temp barely changed.
+        # if old_temp == new_temp:
+            print(f" Equilibrium ~= {new_temp}")
+            break
+
+        old_temp = new_temp
+        old_emit = new_emit
+        # if i % 24 == 0:
+        print(f" Water Temp is: {new_temp:09.5f} at time step {i+1:.0f} {time_units}.")
+
+        # Can we simply calculate the equillibrium directly?
+        # water_mass * water_heat_cap * temperature = SBC * temperature**4 * surface_area * emissivity  # NOTE: This whole section is probably all kinds of wrong.
+        # water_mass * water_heat_cap * temperature = SBC * (temperature*temperature*temperature*temperature) * surface_area * emissivity
+        # water_mass * water_heat_cap = SBC * (temperature*temperature*temperature) * surface_area * emissivity
+        # (temperature*temperature*temperature) = (SBC * surface_area * emissivity) / (water_mass * water_heat_cap)
+        # temperature**3 = (SBC * surface_area * emissivity) / (water_mass * water_heat_cap)
+        # temperature = ((SBC * surface_area * emissivity) / (water_mass * water_heat_cap))**(1/3)
+
+
 
 @njit(cache=True, parallel=True, nogil=True)
 def assign_surface_temp(verts, altitudes, tilt, surf_watts):
@@ -320,8 +457,33 @@ def assign_surface_temp4(verts, altitudes, tilt, surf_watts):
 
     return surface_temps
 
+@njit(cache=True)
+def sample_insolation(vertex, rotation, tilt):
+    # Rotate the planet
+    x = vertex[0]*np.cos(rotation * np.pi/180) - vertex[1]*np.sin(rotation * np.pi/180)
+    y = vertex[0]*np.sin(rotation * np.pi/180) + vertex[1]*np.cos(rotation * np.pi/180)
+    z = vertex[2]
+
+    # For a tidally locked planet we simply would not do more than 1 rotation step in the parent function that calls this function. 
+    # (Do not continuously increment the rotation, simply send the same rotation and tilt value every time; don't update calculate_seasonal_tilt as the planet orbits either, just the initial number.)
+    # (We could technically do 0 rotation steps but then the zenith would always be at lon 0 and it would be nicer
+    # to allow the user to give an offset so they can determine which part of the planet experiences the solar zenith.)
+
+    # Tilt the planet
+    a = x*np.cos(tilt * np.pi/180) + z*np.sin(tilt * np.pi/180)
+    b = y
+    c = z*np.cos(tilt * np.pi/180) - x*np.sin(tilt * np.pi/180)
+
+    # lat, lon = xyz2latlon(x, y, z)
+    lat, lon = xyz2latlon(a, b, c)
+
+    # lat, lon = xyz2latlon(vertex[0], vertex[1], vertex[2])
+    # dist_from_equator = lat - tilt  # Not actually using this at the moment (or probably ever)
+
+    return max(np.cos(np.abs(lat) * np.pi/180), 0) * max(np.cos(lon * np.pi/180), 0)
+
 @njit(cache=True, parallel=True, nogil=True)
-def assign_surface_temp5(verts, altitudes, tilt, surf_watts):
+def calc_daily_insolation(verts, altitudes, tilt, surf_watts):
     surface_temps = np.zeros(len(verts), dtype=np.float32)
     alt_intensity = 0  # Controls strength of altitude contribution to temp.
     h2 = rescale(altitudes, 0, alt_intensity)
@@ -332,37 +494,140 @@ def assign_surface_temp5(verts, altitudes, tilt, surf_watts):
     rot_steps = 360  # then do a lookup for each vert's latitude and interpolate the result.
     rot_amt = 360.0 / rot_steps
 
+    # Add a 'locked=None' argument to the function then replace the above code with the below commented block when implementing tidal locking:
+    # locked is a float that the user can specify (in combination with the tilt) to control where the solar zenith appears on the tidally locked planet.
+    # if locked:
+    #     rotation = locked
+    #     rot_amt = 0
+    # else:
+    #     rotation = -180
+    #     rot_amt = 360.0 / rot_steps
+
     for v in prange(len(verts)):
         # for i in range(-180, 180, 1):
         # for i in range(-120, 121, 1):
         # for i in range(0, 1, 1):
         for i in range(rot_steps):
-            # Rotate the planet
-            x = verts[v][0]*np.cos(rotation * np.pi/180) - verts[v][1]*np.sin(rotation * np.pi/180)
-            y = verts[v][0]*np.sin(rotation * np.pi/180) + verts[v][1]*np.cos(rotation * np.pi/180)
-            z = verts[v][2]
-
-            # Rotate the planet
-            # x = verts[v][0]*np.cos(i * np.pi/180) - verts[v][1]*np.sin(i * np.pi/180)
-            # y = verts[v][0]*np.sin(i * np.pi/180) + verts[v][1]*np.cos(i * np.pi/180)
-            # z = verts[v][2]
-
-            # Tilt the planet
-            a = x*np.cos(tilt * np.pi/180) + z*np.sin(tilt * np.pi/180)
-            b = y
-            c = z*np.cos(tilt * np.pi/180) - x*np.sin(tilt * np.pi/180)
-
-            # lat, lon = xyz2latlon(x, y, z)
-            lat, lon = xyz2latlon(a, b, c)
-
-            # lat, lon = xyz2latlon(verts[v][0], verts[v][1], verts[v][2])
-            dist_from_equator = lat - tilt
-
-            surface_temps[v] += max(np.cos(np.abs(lat) * np.pi/180), 0) * max(np.cos(lon * np.pi/180), 0)  # Okay, so next step is to turn this into temperatures, and then after that subtract the land temps based on altitude.
+            surface_temps[v] += sample_insolation(verts[v], rotation, tilt) # Okay, so next step is to turn this into temperatures, and then after that subtract the land temps based on altitude.
             # NOTE: Also need to compare the distribution to the simple model in the first assign_surface_temps and see if it visually looks like the same distribution. (the numbers on the scale bar will be different, of course)
             rotation += rot_amt
 
+    tmin = np.amin(surface_temps)
+    tmax = np.amax(surface_temps)
+
+    print("  Flux min is ", tmin)
+    print("  Flux max is ", tmax)
+
     return surface_temps
+    # return surface_temps / 360
+
+@njit(cache=True, parallel=True, nogil=True)
+def calc_insolation_slice(radius, tilt, flux, albedo):
+    verts = np.zeros((181, 3), dtype=np.float64)
+    result = np.zeros(181, dtype=np.float32)
+
+    # lat = 90
+    # for i in range(181):
+    #     verts[i] = latlon2xyz(lat, 0)
+    #     lat -= 1
+
+    # Use trickery with negative indexing so that the latitude == the index
+    # Therefore the array looks like [0, 1, ..., 89, 90, -90, -89, ..., -2, -1]
+    # instead of continuous like [90, 89, 88, ..., 1, 0, -1, ..., -89, -90]
+    for i in range(-90, 91, 1):
+        verts[i] = latlon2xyz(i, 0)
+
+    rotation = -180.0
+    # rot_steps = 86400
+    rot_steps = 360
+    rot_amt = 360.0 / rot_steps
+
+    for v in prange(len(verts)):
+        for i in range(rot_steps):
+            result[v] += sample_insolation(verts[v], rotation, tilt) # Okay, so next step is to turn this into temperatures, and then after that subtract the land temps based on altitude.
+            # NOTE: Also need to compare the distribution to the simple model in the first assign_surface_temps and see if it visually looks like the same distribution. (the numbers on the scale bar will be different, of course)
+            rotation += rot_amt
+
+    tmin = np.amin(result)
+    tmax = np.amax(result)
+
+    print("  Slice min is", tmin)
+    print("  Slice max is", tmax)
+    return result
+
+@njit(cache=True, parallel=True, nogil=True)
+def calc_daily_insolation_2(verts, altitudes, tilt, lookup_table, surf_watts):
+    surface_temps = np.zeros(len(verts), dtype=np.float32)
+    alt_intensity = 0  # Controls strength of altitude contribution to temp.
+    h2 = rescale(altitudes, 0, alt_intensity)
+
+    for v in prange(len(verts)):
+        lat, _ = xyz2latlon(verts[v][0], verts[v][1], verts[v][2])
+        lower = int(np.floor(lat))
+        upper = int(np.ceil(lat))
+
+        # print("-----")
+        # print("  lat:", lat)
+        # print("lower:", lower)
+        # print("upper:", upper)
+
+        if -90 > lower or -90 > upper or lower > 90 or upper > 90:
+            print("BUTTS HAS HAPPENED")
+            print("lower:", lower)
+            print("upper:", upper)
+
+        if lower == upper:
+            surface_temps[v] = lookup_table[lower]
+#            print("lookup:", lookup_table[lower])
+        else:
+            # https://www.geeksforgeeks.org/how-to-implement-linear-interpolation-in-python
+            surface_temps[v] = lookup_table[lower] + (lat - lower) * ((lookup_table[upper]-lookup_table[lower]) / (upper-lower))
+
+    tmin = np.amin(surface_temps)
+    tmax = np.amax(surface_temps)
+
+    print("  Applied slice min is", tmin)
+    print("  Applied slice max is", tmax)
+    return surface_temps
+
+def calc_hour_angle_insolation(tsi):
+    """Solar flux at specific latitude, time, and day of year"""
+
+    solstice = 173
+    year_length = 365.25
+    day_length = 24
+    half_day = day_length / 2
+
+    hour = 12
+    day = 80
+    latitude = 0
+    longitude = 0
+
+    axial_tilt = 23.44
+    current_tilt = calculate_seasonal_tilt(axial_tilt, 90)
+
+#        hour_angle = ( ((hour - half_day) * np.pi) / day_length ) + ((longitude * np.pi) / 180)
+    # hour_angle = 90
+    hour_angle = (360 / day_length) * (hour - half_day)  # In degrees
+
+    declination = current_tilt * (np.pi/180) * np.cos( (2*np.pi * (day - solstice)) / year_length )
+
+#        hour_angle = np.arccos(-np.tan(latitude) * np.tan(declination))# * np.pi/180
+
+    # zenith = ( np.sin(latitude * (np.pi/180)) * np.sin(declination) + np.cos(latitude * (np.pi/180)) ) * ( np.cos(declination) * np.cos(hour_angle) )
+    zenith = ( np.sin(latitude * (np.pi/180)) * np.sin(declination * (np.pi/180)) + np.cos(latitude * (np.pi/180)) ) * ( np.cos(declination * (np.pi/180)) * hour_angle )
+
+    flux = tsi * np.cos(zenith * (np.pi/180))# * longwave_transmittance
+    # flux = tsi * (1-world_albedo) * np.cos(zenith)# * longwave_transmittance
+
+    test = tsi * np.cos(np.abs(latitude - current_tilt) * (np.pi/180)) * np.cos(hour_angle * (np.pi/180))  # Not quite right; when hour is 12 and lat = 0 it should be at full strength
+
+    print(f"TSI is {tsi}")
+    print(f"Hour angle is {hour_angle}")
+    print(f"Declination angle is {declination}")
+    print(f"Zenith angle is {zenith}")
+    print(f"Flux at Lat: {latitude}, Lon: {longitude} at hour {hour} is: {flux}")
+    print(f"Test is {test}")
 
 # ToDo: Should it be called humidity or moisture? This is the water content of the air.  Pretty sure it's humidity.
 # ToDo: Do some book learnin' and find out if altitude modifies humidity. And temperature.
@@ -375,6 +640,7 @@ def assign_surface_humidity(verts, water_mask):
     return humidity
 
 # Not sure if input1 or input2 is returned when mask is 0 (and the opposite as well; not sure which is returned when mask is 1)
+# https://blender.stackexchange.com/questions/43801/what-is-the-c-mathf-lerp-equivalent-in-python
 @njit(cache=True)
 def lerp1(input1, input2, mask):
     return (mask * input1) + ((1 - mask) * input2)  # convex combination
@@ -383,4 +649,3 @@ def lerp1(input1, input2, mask):
 def lerp2(input1, input2, mask):
     # return input1 * (1 - mask) + input2 * mask
     return mask * input2 + (1 - mask) * input1
-
