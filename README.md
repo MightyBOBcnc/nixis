@@ -43,7 +43,7 @@ Important settings are stored in the options.json file in the main directory. Wh
     "img_width": 2048,           # Width of exported images (It is recommended that this be 2x the height)
     "img_height": 1024,          # Height of exported images (It is recommended that this be 0.5x the width)
     "img_format": "png",         # Format of exported images (In theory any format supported by Pillow should work)
-    "bit_depth": 16,              # Bit-depth per channel of exported images
+    "bit_depth": 16,             # Bit-depth per channel of exported images
     "export_list": {},           # A dict of which maps should be exported (e.g. height, temperature, biome, etc.)
     "mesh_format": "obj",        # Format of exported 3D mesh files
     "point_format": "ply",       # Format of exported 3D point clouds
