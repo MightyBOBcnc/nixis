@@ -9,6 +9,7 @@ from PIL import Image
 import numpy as np
 from numba import njit, prange
 from scipy.spatial import KDTree
+import cfg
 # pylint: disable=not-an-iterable
 # pylint: disable=line-too-long
 
@@ -56,7 +57,7 @@ def create_mesh(divisions):
 @njit(cache=True)
 def xyz2latlon(x, y, z, r=1):
     """Convert 3D spatial XYZ coordinates into Latitude and Longitude."""
-    # Old method; will output NaNs if Z > 1 or Z < -1
+    # Old method; will output NaNs if (Z/R) > 1 or (Z/R) < -1
     # lat = np.degrees(np.arcsin(z / r))
 
     # Constrain the value to -1 to 1 before doing arcsin
@@ -187,10 +188,10 @@ def build_KDTree(points, lf=10):
     time_start = time.perf_counter()
     # Default leaf size is 10 
     # https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.KDTree.html
-    KDT = KDTree(points, leafsize=lf)
+    cfg.KDT = KDTree(points, leafsize=lf)
     time_end = time.perf_counter()
     print(f"KD built in {time_end - time_start :.5f} sec")
-    return KDT
+    # return cfg.KDT  # No point in returning if it's already saved to cfg
 
 # =============================================
 # Image-related utilities
@@ -198,7 +199,8 @@ def build_KDTree(points, lf=10):
 
 @njit(cache=True, parallel=True, nogil=True)
 def make_ll_arr(width, height):
-    """Create an array of XYZ coordinates from latitudes and longitudes"""
+    """Find XYZ coordinates for each pixel's latitude and longitude"""
+    # Each pixel that will compose the exported world map has its own lat/lon.
     map_array = np.ones((height, width, 3), dtype=np.float64)
     lat = 90
     lon = 180
@@ -210,6 +212,7 @@ def make_ll_arr(width, height):
     for h in prange(height):
         # Loop through each Longitude per latitude.
         for w in prange(width):
+            # Take the pixel's lat/lon and get its 3D coordinates
             d = latlon2xyz(max(lat - (h * latpercent), -90), max(lon - (w * lonpercent), -180))
             map_array[h][w] = d
     return map_array
@@ -238,7 +241,7 @@ def make_m_array(width, height, dists, nbrs, colors):
             map_array[h][w] = [value, value, value]
     return map_array
 
-def build_image_data(imgquery, colors=None):  # Could rename this to like make_image_data (my naming conventions are not unitform, some functions are "make_", some are "build_", and some are "create_"; make_ would be shortest)
+def build_image_data(colors=None):  # Could rename this to like make_image_data (my naming conventions are not unitform, some functions are "make_", some are "build_", and some are "create_"; make_ would be shortest)
     """Use KD-Tree results to sample vertices and build a map for export.
     imgquery -- Array/list that holds the KD Tree distance and neighbor arrays.
     colors -- A dict of numpy arrays. Keys are names, arrays hold the data.
@@ -257,8 +260,8 @@ def build_image_data(imgquery, colors=None):  # Could rename this to like make_i
 
     print("Sampling verts for texture...")
 
-    dst = imgquery[0]
-    nbrs = imgquery[1]
+    dists = cfg.IMG_QUERY_DATA[0]
+    nbrs = cfg.IMG_QUERY_DATA[1]
     result = {}
 
     if not isinstance(colors, dict):
@@ -266,7 +269,7 @@ def build_image_data(imgquery, colors=None):  # Could rename this to like make_i
 
     for key, array in colors.items():
         time_start = time.perf_counter()
-        pixels = make_m_array(width, height, dst, nbrs, array)
+        pixels = make_m_array(width, height, dists, nbrs, array)
         time_end = time.perf_counter()
         print(f"  {key} pixels built in   {time_end - time_start :.5f} sec")
         result[key] = pixels
