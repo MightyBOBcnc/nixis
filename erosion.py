@@ -2,8 +2,10 @@
 import random
 import numpy as np
 from numba import jit, njit, prange
+import cfg
 from util import *
 # pylint: disable=not-an-iterable
+# pylint: disable=line-too-long
 
 # ToDo:
 # Split erosion into functions by type.
@@ -165,7 +167,7 @@ def erosion_iteration2(verts, neighbors, r_buff, wat, sed, w_buff):  # However t
 # =========================
 
 # @njit(cache=True)
-def erode_terrain3(nodes, neighbors, heights, num_iter=1, snapshot=None):
+def erode_terrain3(nodes, neighbors, heights, num_iter=1, snapshot=False):
     print("Starting terrain erosion...")
     if num_iter <= 0:
         num_iter = 1
@@ -173,7 +175,7 @@ def erode_terrain3(nodes, neighbors, heights, num_iter=1, snapshot=None):
     water = np.zeros_like(heights)  # ToDo: Dtypes!  Save RAM?!
     sediment = np.zeros_like(heights)  # ToDo: Dtypes!  Save RAM?!
 
-    if snapshot is not None:
+    if snapshot:
         my_dir = os.path.dirname(os.path.abspath(__file__))
         options = load_settings("options.json")
         save_dir = os.path.join(my_dir, options["save_folder"], "snapshots")
@@ -190,12 +192,12 @@ def erode_terrain3(nodes, neighbors, heights, num_iter=1, snapshot=None):
         water += rain_amount
         erosion_iteration3(nodes, neighbors, heights, water, sediment)
 
-        if snapshot is not None:  #ToDo: This is quite slow.  Also it's a dumb hack.
+        if snapshot:  #ToDo: This is quite slow.
             dictionary = {}
             rescaled_h = rescale(heights, 0, 255)  #NOTE: Due to the relative nature of rescale, if the min or max height changes then the scale will be messed up.
             dictionary[f"{i+1:03d}"] = rescaled_h
 
-            pixel_data = build_image_data(snapshot, dictionary)
+            pixel_data = build_image_data(dictionary)
             save_image(pixel_data, save_dir, "erosion_snapshot")
 
 # Attempting Travis Archer's description of hydraulic erosion combined with the race condition fix described by Axel Paris.
@@ -257,7 +259,7 @@ def erosion_iteration3(verts, neighbors, r_buff, wat, sed):
                     # print(" Subtracting", max(wat[n] * d, 0), "from wat_amt")
 
                 else:
-                    print("  Doing Nothing.")
+                    print("  Doing Nothing.")  # This is problematic if the function is fed a height array that has a clipped ocean level because it will spam this print for all vertices in the ocean.
 
 # Technically speaking we are not handling cases where the slope is == 0 because the height is the same.
 # It's also possible that for cases with very low slope (nearly the same height) we are adding or subtracting TOO much to sediment and water.  And water doesn't use a pressure model.
