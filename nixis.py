@@ -5,15 +5,16 @@ import sys
 import argparse
 import time
 # import math
-import json
-import concurrent.futures
+# import json
+# import concurrent.futures
 # import meshio as mi
-import meshzoo as mz
+# import meshzoo as mz
 import numpy as np
 from numba import njit, prange
 import pyvista as pv
-from scipy.spatial import KDTree
+# from scipy.spatial import KDTree
 import opensimplex as osi
+import cfg
 from util import *
 from erosion import *
 from climate import *
@@ -56,6 +57,14 @@ from climate import *
 #    https://www.reddit.com/r/learnpython/comments/ph9hp4/how_tiring_is_print_function_for_the_computer/ (useful tip: can use modulus to only record every X iterations, e.g. for i in range whatever, if i % 100 == 0: print(stuff))
 #    https://stackoverflow.com/questions/60077079/how-can-i-disable-numba-debug-logging-when-debug-env-variable-is-set
 # - Maybe some fancy progress bars. https://tqdm.github.io/
+
+class NixisPlanet:
+    """Base class for Nixis planets."""
+    def __init__(self):
+        radius = None
+        orbit_distance = None
+        elevation = None
+        surface_temp = None
 
 def main():
     """Main function."""
@@ -149,7 +158,6 @@ def main():
     save_dir = os.path.join(my_dir, options["save_folder"])
     export_list = options["export_list"]
 
-    KDT = None
     test_latlon = False
 
     do_erode = False
@@ -166,7 +174,7 @@ def main():
         # print("Failed to create script output directory! Check folder permissions.")
         pass
 
-    world_config = {
+    cfg.WORLD_CONFIG = {
         "world_name": world_name,
         "world_seed": world_seed,
         "divisions": divisions,
@@ -180,7 +188,7 @@ def main():
 
     # Save the world configuration as a preset
     if args.config:
-        save_settings(world_config, save_dir, world_name + '_config', fmt=options["settings_format"])
+        save_settings(cfg.WORLD_CONFIG, save_dir, world_name + '_config', fmt=options["settings_format"])
 
 # Start the party
 # =============================================
@@ -214,15 +222,18 @@ def main():
     # ToDo: Test compact_nodes and balanced_tree args for build/query performance tradeoffs
     if args.png or snapshot_erosion or snapshot_climate:
         time_start = time.perf_counter()
+        # Array of 3D coordinates on the sphere for each pixel that will be in the exported image.
         ll = make_ll_arr(img_width, img_height)
         ll_end = time.perf_counter()
-        KDT = build_KDTree(points)
+        build_KDTree(points)
         kdt_end = time.perf_counter()
-        img_query_data = KDT.query(ll, k=3, workers=-1)
+        # For each pixel's 3D coordinates, this is the 3 nearest vertices, and the distances to said vertices.
+        # The name kinda sucks though. Maybe I could rename it img_pixel_neighbors.
+        cfg.IMG_QUERY_DATA = cfg.KDT.query(ll, k=3, workers=-1)
         query_end = time.perf_counter()
 
         ll = None
-        KDT = None
+        cfg.KDT = None
 
         print(f"  LL built in       {ll_end - time_start :.5f} sec")
         print(f"  KD Tree built in  {kdt_end - ll_end :.5f} sec")
@@ -280,7 +291,7 @@ def main():
     if args.png and not do_erode:
         export_list["height"] = height
 
-# Erode! 
+# Erode!
 # ToDo: Which came first, the erosion or the climate? Maybe do climate first, as the initial precipitation determines erosion rates.
 #   Temperature also determines evaporation rate which affects how much erosion we can do.
 #   And if we're being fancy with Thermal Erosion instead of approximating then we need surface temps first.
@@ -299,10 +310,7 @@ def main():
         # the mask and becomes part of the land points.
 
         erode_start = time.perf_counter()
-        if snapshot_erosion:
-            erode_terrain3(points, neighbors, height, num_iter=11, snapshot=img_query_data)
-        else:
-            erode_terrain3(points, neighbors, height, num_iter=11, snapshot=None)
+        erode_terrain3(points, neighbors, height, num_iter=11, snapshot=snapshot_erosion)
         erode_end = time.perf_counter()
         print(f"Erosion runtime: {erode_end-erode_start:.5f}")
 
@@ -327,7 +335,7 @@ def main():
         # ====================
         # NOTE: The original temperature assignment code
 
-        axial_tilt = 8.0
+        axial_tilt = 23.44
         current_tilt = calculate_seasonal_tilt(axial_tilt, 90)
 
         print("Assigning starting temperatures...")
@@ -342,22 +350,33 @@ def main():
         if args.png:
             export_list["surface_temp"] = surface_temps
 
+        # temps_1 = assign_surface_temp4(points, height, 23.44, tsi)
+
         # ====================
         # NOTE: Attempt 1 at spherical solar flux (hour angle stuff)
         # calc_hour_angle_insolation(tsi)
 
         # NOTE: Attempt 2 at spherical solar flux.
-        temps_2 = calc_daily_insolation(points, height, current_tilt, tsi)
+        print("Calculating solar insolation, V1 (full planet)...")  # The difference between V1 and V2 is stark. For k=2000 there are 40mil vertices...
+        temp_start = time.perf_counter()
+        temps_2 = calc_daily_insolation(points, height, current_tilt, tsi, snapshot=snapshot_climate)
+        temp_end = time.perf_counter()
+        print(f"Runtime: {temp_end-temp_start:.5f} sec")
         if args.png:
             export_list["surface_temp_2"] = temps_2
 
-        banana = calc_insolation_slice(world_radius, current_tilt, tsi, world_albedo)
-        # print(banana)
-        taco = calc_daily_insolation_2(points, height, current_tilt, banana, tsi)
+        # NOTE: Version '2.5' which uses the same method as above but with a small slice and interpolation instead of calculating every vertex on the planet times the number of rotation steps.
+        print("Calculating solar insolation, V2 (slice method)...")  # ...V1 takes 68 seconds and V2 only takes 0.27 seconds--both with 360 rotation steps. This is comparable to the original assign_surface_temp that was latitude+height only.
+        temp_start = time.perf_counter()
+        longitude_slice = calc_insolation_slice(world_radius, current_tilt, tsi, world_albedo)
+        # print(longitude_slice)
+        temps_3 = calc_daily_insolation_2(points, height, current_tilt, longitude_slice, tsi)
+        temp_end = time.perf_counter()
+        print(f"Runtime: {temp_end-temp_start:.5f} sec")
 
-        # taco *= (tsi/360)  # Compared to the NASA data for 1980 this is off by like 20 Watts or so, but the cosine angle is basically perfect.
+        # temps_3 *= (tsi/360)  # Compared to the NASA data for 1980 this is off by like 20 Watts or so, but the cosine angle is basically perfect.
         if args.png:
-            export_list["surface_temp_3"] = taco
+            export_list["surface_temp_3"] = temps_3
 
         # calc_equilibrium_temp()
 
@@ -366,12 +385,12 @@ def main():
 # =============================================
     if test_latlon:
         llpoint = latlon2xyz(20, 10)
-        if KDT is None:
-            KDT = build_KDTree(points)
+        if cfg.KDT is None:
+            build_KDTree(points)
 
         print("Querying KD Tree for neighbors...")
         query_start = time.perf_counter()
-        distances, neighbors = KDT.query(llpoint, 3)
+        distances, neighbors = cfg.KDT.query(llpoint, 3)
         query_end = time.perf_counter()
         print(f"Query finished in {query_end - query_start :.5f} sec")
 
@@ -389,13 +408,13 @@ def main():
             export_list[key] = rescale(array, 0, 255)
             # print("after heights: ", np.round(f_rescale.astype(int)))
 
-        pixel_data = build_image_data(img_query_data, export_list)
+        pixel_data = build_image_data(export_list)
         save_start = time.perf_counter()
         save_image(pixel_data, save_dir, world_name)
         save_end = time.perf_counter()
         print(f"Write to disk finished in  {save_end - save_start :.5f} sec")
 
-        img_query_data = None
+        cfg.IMG_QUERY_DATA = None
         pixel_data = None
 
 # Visualize the final planet
@@ -416,7 +435,8 @@ def main():
 
     points *= np.reshape(height/world_radius + 1, (len(points), 1))  # Rather, do it this way instead
     # visualize(points, cells, surface_temps, tilt=current_tilt)
-    visualize(points, cells, taco, tilt=current_tilt)
+    # visualize(points, cells, temps_3, tilt=current_tilt)
+    visualize(points, cells, temps_2, tilt=current_tilt)
 
     # ToDo: PyVista puts execution 'on hold' while it visualizes. After the user closes it execution resumes.
     # Consider asking the user right here if they want to save out the result as a png/mesh/point cloud.
@@ -432,7 +452,7 @@ def main():
 
 @njit(cache=True, parallel=True, nogil=True)
 def sample_noise(verts, perm, pgi, n_roughness=1, n_strength=0.2, radius=1):
-    """Sample a simplex noise for given vertices"""
+    """Sample a simplex noise for given vertices."""
     elevations = np.ones(len(verts))
 
     rough_verts = verts * n_roughness
@@ -447,6 +467,7 @@ def sample_noise(verts, perm, pgi, n_roughness=1, n_strength=0.2, radius=1):
 
 
 def sample_octaves(verts, elevations, perm, pgi, n_octaves=1, n_init_roughness=1.5, n_init_strength=0.4, n_roughness=2.0, n_persistence=0.5, ocean_percent=0.5, world_radius=1.0):
+    """Sample octaves of noise and combine them together."""
     if elevations is None:
         elevations = np.zeros(len(verts))
     n_freq = n_init_roughness  # Frequency
@@ -463,13 +484,13 @@ def sample_octaves(verts, elevations, perm, pgi, n_octaves=1, n_init_roughness=1
         print(f" {time_end - time_start :.5f} sec")
 
 
-    time_nmin = time.perf_counter()
+    # time_nmin = time.perf_counter()
     emin = np.amin(elevations)
-    time_nmax = time.perf_counter()
+    # time_nmax = time.perf_counter()
     emax = np.amax(elevations)
-    time_end = time.perf_counter()
-    print(f"  Time to find numpy min: {time_nmax - time_nmin :.5f} sec")
-    print(f"  Time to find numpy max: {time_end - time_nmax :.5f} sec")
+    # time_end = time.perf_counter()
+    # print(f"  Time to find numpy min: {time_nmax - time_nmin :.5f} sec")
+    # print(f"  Time to find numpy max: {time_end - time_nmax :.5f} sec")
     print("  min:", emin)
     print("  max:", emax)
     return elevations
