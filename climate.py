@@ -534,17 +534,6 @@ def calc_daily_insolation(verts, altitudes, tilt, surf_watts, snapshot=False):  
     #     rotation = -180
     #     rot_amt = 360.0 / rot_steps
 
-    if snapshot:
-        my_dir = os.path.dirname(os.path.abspath(__file__))
-        options = load_settings("options.json")
-        save_dir = os.path.join(my_dir, options["save_folder"], "snapshots")
-        try:  # ToDo: Test if the directory already exists. Maybe even attempt to see if we have write permission beforehand.
-            os.mkdir(save_dir)
-        except:
-            # ToDo: Actual exception types
-            # print("Failed to create script output directory!")
-            pass
-
     for i in range(rot_steps):
         sample_insolation(surface_temps, verts, rotation, tilt)
         rotation += rot_amt
@@ -555,7 +544,7 @@ def calc_daily_insolation(verts, altitudes, tilt, surf_watts, snapshot=False):  
             dictionary[f"{i+1:03d}"] = rescaled_i
 
             pixel_data = build_image_data(dictionary)
-            save_image(pixel_data, save_dir, "insolation_snapshot")
+            save_image(pixel_data, cfg.SNAP_DIR, "insolation_snapshot")
 
     tmin = np.amin(surface_temps)
     tmax = np.amax(surface_temps)
@@ -590,7 +579,7 @@ def calc_insolation_slice(radius, tilt, flux, albedo):
     rot_steps = 360
     rot_amt = 360.0 / rot_steps
 
-    for x in range(rot_steps): # x is an unused var. We could do something about that, like the restructure of make_ll_arr, but it's not strictly needed.
+    for x in range(rot_steps): # x is an unused var. We could do something about that, like the restructure of make_ll_arr, or a while loop, but it's not strictly needed.
         sample_insolation(result, verts, rotation, tilt)
         rotation += rot_amt
 
@@ -619,23 +608,17 @@ def calc_daily_insolation_2(verts, altitudes, tilt, lookup_table, surf_watts):
         lower = int(np.floor(lat))
         upper = int(np.ceil(lat))
 
-        # print("-----")
-        # print("  lat:", lat)
-        # print("lower:", lower)
-        # print("upper:", upper)
-
         if -90 > lower or -90 > upper or lower > 90 or upper > 90:
-            print("BUTTS HAS HAPPENED")
+            print("OUT OF RANGE SOMEHOW!")
             print("lower:", lower)
             print("upper:", upper)
 
         if lower == upper:
             surface_temps[v] = lookup_table[lower]
-#            print("lookup:", lookup_table[lower])
         else:
             # https://www.geeksforgeeks.org/how-to-implement-linear-interpolation-in-python
-            # Given 2 coordinates and the values at those coordinates..
-            # and given a 3rd coordinate that lies between..
+            # Given 2 coordinates (lower, upper) and the values at those coordinates (lookup_table)..
+            # and given a 3rd coordinate (lat) that lies between them..
             # find the interpolated value at the 3rd coordinate.
             surface_temps[v] = lookup_table[lower] + (lat - lower) * ((lookup_table[upper]-lookup_table[lower]) / (upper-lower))
 
