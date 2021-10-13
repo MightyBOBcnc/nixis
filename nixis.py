@@ -151,11 +151,12 @@ def main():
     star_radius = 696340
     star_temp = 5778  # Kelvin
 
-    my_dir = os.path.dirname(os.path.abspath(__file__))
     options = load_settings("options.json")
+    cfg.WORK_DIR = os.path.dirname(os.path.abspath(__file__))
+    cfg.SAVE_DIR = os.path.join(cfg.WORK_DIR, options["save_folder"])
+    cfg.SNAP_DIR = os.path.join(cfg.WORK_DIR, options["save_folder"], options["snapshot_folder"])
     img_width = options["img_width"]
     img_height = options["img_height"]
-    save_dir = os.path.join(my_dir, options["save_folder"])
     export_list = options["export_list"]
 
     test_latlon = False
@@ -166,13 +167,20 @@ def main():
     snapshot_erosion = False
     snapshot_climate = False
 
-    # ToDo: We should possibly only try making the dir at the moment we save.
-    try:  # ToDo: Test if the directory already exists. Maybe even attempt to see if we have write permission beforehand.
-        os.mkdir(save_dir)
+    # ToDo: For both of the below we should possibly only try making the dir at the moment we save.
+    # Test if the directory already exists. Maybe even attempt to see if we have write permission beforehand.
+    # Actual exception types
+    try:
+        os.mkdir(cfg.SAVE_DIR)
     except:
-        # ToDo: Actual exception types
         # print("Failed to create script output directory! Check folder permissions.")
         pass
+    if snapshot_erosion or snapshot_climate:
+        try:
+            os.mkdir(cfg.SNAP_DIR)
+        except:
+            # print("Failed to create script output directory!")
+            pass
 
     cfg.WORLD_CONFIG = {
         "world_name": world_name,
@@ -188,7 +196,7 @@ def main():
 
     # Save the world configuration as a preset
     if args.config:
-        save_settings(cfg.WORLD_CONFIG, save_dir, world_name + '_config', fmt=options["settings_format"])
+        save_settings(cfg.WORLD_CONFIG, cfg.SAVE_DIR, world_name + '_config', fmt=options["settings_format"])
 
 # Start the party
 # =============================================
@@ -210,11 +218,11 @@ def main():
     # If I need to output several meshes for examination
     # for i in range(2, 26, 2):
     #     a, b = create_mesh(i)
-    #     save_mesh(a, b, save_dir, f"{i:02}" + '_smooth')
+    #     save_mesh(a, b, cfg.SAVE_DIR, f"{i:02}" + '_smooth')
 
 # Saving the mesh here just writes a plain sphere with no elevation offsets (for debug)
     if args.mesh:
-        save_mesh(points, cells, save_dir, world_name + '_smooth')
+        save_mesh(points, cells, cfg.SAVE_DIR, world_name + '_smooth')
 
 # Prepare KD Tree and stuff for image saving
 # =============================================
@@ -410,7 +418,7 @@ def main():
 
         pixel_data = build_image_data(export_list)
         save_start = time.perf_counter()
-        save_image(pixel_data, save_dir, world_name)
+        save_image(pixel_data, cfg.SAVE_DIR, world_name)
         save_end = time.perf_counter()
         print(f"Write to disk finished in  {save_end - save_start :.5f} sec")
 
@@ -445,7 +453,7 @@ def main():
 
 # Cleanup
 # =============================================
-    # temp_path = os.path.join(save_dir, world_name + '_config.' + options["settings_format"])
+    # temp_path = os.path.join(cfg.SAVE_DIR, world_name + '_config.' + options["settings_format"])
     # if os.path.exists(temp_path):
     #     os.remove(temp_path)
 
