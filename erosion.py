@@ -175,17 +175,6 @@ def erode_terrain3(nodes, neighbors, heights, num_iter=1, snapshot=False):
     water = np.zeros_like(heights)  # ToDo: Dtypes!  Save RAM?!
     sediment = np.zeros_like(heights)  # ToDo: Dtypes!  Save RAM?!
 
-    if snapshot:
-        my_dir = os.path.dirname(os.path.abspath(__file__))
-        options = load_settings("options.json")
-        save_dir = os.path.join(my_dir, options["save_folder"], "snapshots")
-        try:  # ToDo: Test if the directory already exists. Maybe even attempt to see if we have write permission beforehand.
-            os.mkdir(save_dir)
-        except:
-            # ToDo: Actual exception types
-            # print("Failed to create script output directory!")
-            pass
-
     for i in range(num_iter):
         print("  Erosion pass:", i+1,"of", num_iter)
         rain_amount = 0.3 / 320# * random.random()
@@ -198,7 +187,7 @@ def erode_terrain3(nodes, neighbors, heights, num_iter=1, snapshot=False):
             dictionary[f"{i+1:03d}"] = rescaled_h
 
             pixel_data = build_image_data(dictionary)
-            save_image(pixel_data, save_dir, "erosion_snapshot")
+            save_image(pixel_data, cfg.SNAP_DIR, "erosion_snapshot")
 
 # Attempting Travis Archer's description of hydraulic erosion combined with the race condition fix described by Axel Paris.
 # Procedurally Generating Terrain - mics2011_submission_30.pdf
@@ -258,8 +247,8 @@ def erosion_iteration3(verts, neighbors, r_buff, wat, sed):
                     # print(" Subtracting", max(solubility * wat[n], 0), "from sed_amt")
                     # print(" Subtracting", max(wat[n] * d, 0), "from wat_amt")
 
-                else:
-                    print("  Doing Nothing.")  # This is problematic if the function is fed a height array that has a clipped ocean level because it will spam this print for all vertices in the ocean.
+#                else:
+#                    print("  Doing Nothing.")  # This is problematic if the function is fed a height array that has a clipped ocean level because it will spam this print for all vertices in the ocean.
 
 # Technically speaking we are not handling cases where the slope is == 0 because the height is the same.
 # It's also possible that for cases with very low slope (nearly the same height) we are adding or subtracting TOO much to sediment and water.  And water doesn't use a pressure model.
