@@ -1,5 +1,8 @@
-
 """Important vars that need to be globally accessible across modules."""
+
+WORK_DIR = None
+SAVE_DIR = None
+SNAP_DIR = None
 
 WORLD_CONFIG = {}
 
