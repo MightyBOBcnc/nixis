@@ -151,7 +151,7 @@ def main():
     star_radius = 696340
     star_temp = 5778  # Kelvin
 
-    options = load_settings("options.json")
+    options = load_settings("options.json")  # ToDo: If the user specifies args.png then we should grab the desired output maps from options.json. Right now the export_list dict is not being used at all.
     cfg.WORK_DIR = os.path.dirname(os.path.abspath(__file__))
     cfg.SAVE_DIR = os.path.join(cfg.WORK_DIR, options["save_folder"])
     cfg.SNAP_DIR = os.path.join(cfg.WORK_DIR, options["save_folder"], options["snapshot_folder"])
@@ -344,47 +344,52 @@ def main():
         # NOTE: The original temperature assignment code
 
         axial_tilt = 23.44
-        current_tilt = calculate_seasonal_tilt(axial_tilt, 90)
+        current_tilt = calculate_seasonal_tilt(axial_tilt, 0)
 
         print("Assigning starting temperatures...")
         temp_start = time.perf_counter()
-        if snapshot_climate:
-            surface_temps = assign_surface_temp(points, height, current_tilt, tsi)  # ToDo: When climate sim actually has steps, implement snapshotting
-        else:
-            surface_temps = assign_surface_temp(points, height, current_tilt, tsi)
+        surface_temps = assign_surface_temp(points, height, current_tilt, tsi)
         temp_end = time.perf_counter()
         print(f"Assign surface temps runtime: {temp_end-temp_start:.5f} sec")
 
         if args.png:
             export_list["surface_temp"] = surface_temps
 
-        # temps_1 = assign_surface_temp4(points, height, 23.44, tsi)
-
         # ====================
-        # NOTE: Attempt 1 at spherical solar flux (hour angle stuff)
+        # NOTE: Attempt 1 at spherical solar flux (hour angle stuff); big fail.
         # calc_hour_angle_insolation(tsi)
 
-        # NOTE: Attempt 2 at spherical solar flux.
-        print("Calculating solar insolation, V1 (full planet)...")  # The difference between V1 and V2 is stark. For k=2000 there are 40mil vertices...
+        # NOTE: Instant insolation
+        instant = False
+        if instant:
+            print("Calculating solar insolation snapshot in time...")
+            temp_start = time.perf_counter()
+            insol_2 = calc_instant_insolation(points, height, current_tilt, 0)
+            temp_end = time.perf_counter()
+            print(f"Runtime: {temp_end-temp_start:.5f} sec")
+            if args.png:
+                export_list["instant_insol"] = insol_2
+
+        # NOTE: Version '2.5'
+        print("Calculating daily solar insolation (slice method)...")
         temp_start = time.perf_counter()
-        temps_2 = calc_daily_insolation(points, height, current_tilt, tsi, snapshot=snapshot_climate)
+        longitude_slice = calc_insolation_slice(world_radius, current_tilt, tsi, world_albedo)  # These two lines
+        daily_insolation = calc_daily_insolation(points, height, current_tilt, longitude_slice, tsi)   # should be combined into one function named calc_daily_insolation
         temp_end = time.perf_counter()
         print(f"Runtime: {temp_end-temp_start:.5f} sec")
-        if args.png:
-            export_list["surface_temp_2"] = temps_2
 
-        # NOTE: Version '2.5' which uses the same method as above but with a small slice and interpolation instead of calculating every vertex on the planet times the number of rotation steps.
-        print("Calculating solar insolation, V2 (slice method)...")  # ...V1 takes 68 seconds and V2 only takes 0.27 seconds--both with 360 rotation steps. This is comparable to the original assign_surface_temp that was latitude+height only.
+        # daily_insolation *= (tsi/360)  # Compared to the NASA data for 1980 this is off by like 20 Watts or so, but the cosine angle is basically perfect.
+        if args.png:
+            export_list["daily_insolation"] = daily_insolation
+
+        print("Calculating annual solar insolation (slice method)...")
         temp_start = time.perf_counter()
-        longitude_slice = calc_insolation_slice(world_radius, current_tilt, tsi, world_albedo)
-        # print(longitude_slice)
-        temps_3 = calc_daily_insolation_2(points, height, current_tilt, longitude_slice, tsi)
+        annual_insolation = calc_yearly_insolation(world_radius, axial_tilt, tsi, world_albedo, points, height, snapshot_climate)
         temp_end = time.perf_counter()
         print(f"Runtime: {temp_end-temp_start:.5f} sec")
 
-        # temps_3 *= (tsi/360)  # Compared to the NASA data for 1980 this is off by like 20 Watts or so, but the cosine angle is basically perfect.
         if args.png:
-            export_list["surface_temp_3"] = temps_3
+            export_list["annual_insolation"] = annual_insolation
 
         # calc_equilibrium_temp()
 
@@ -444,7 +449,7 @@ def main():
     points *= np.reshape(height/world_radius + 1, (len(points), 1))  # Rather, do it this way instead
     # visualize(points, cells, surface_temps, tilt=current_tilt)
     # visualize(points, cells, temps_3, tilt=current_tilt)
-    visualize(points, cells, temps_2, tilt=current_tilt)
+    visualize(points, cells, annual_insolation, tilt=current_tilt)
 
     # ToDo: PyVista puts execution 'on hold' while it visualizes. After the user closes it execution resumes.
     # Consider asking the user right here if they want to save out the result as a png/mesh/point cloud.
