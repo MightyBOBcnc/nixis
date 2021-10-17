@@ -180,6 +180,12 @@ def find_nearest(arr, num):
     # return arr[idx]  # Returns the value of the nearest number
     return (np.abs(arr - num)).argmin()  # Returns the index
 
+# ToDo: I wonder if a triangle wave would be more appropriate than a sine wave? A circular orbit is (effectively) a constant speed but a sine wave isn't linear.
+# One of the pages I read about tilt in the context of a 90 degree tilted axis said the transition of the solar zenith would be essentially a continuous linear motion
+# from pole to pole and back again. On the other hand, all the annual insolation chart graphics seem to approximate a sine more than a linear spike.
+# https://stackoverflow.com/questions/12332392/triangle-wave-shaped-array-in-python
+# Oh, I know, I should graph my 1980 reference spreadsheet at a few given latitudes and see how that looks.
+# (I did this and they're sine-like; I should really output my arrays into a csv so I can graph Nixis data directly, or maybe pyvista or scipy line graphing.)
 @njit(cache=True)
 def calculate_seasonal_tilt(axial_tilt, degrees):
     """Find the seasonal tilt offset from axial tilt and orbit (in degrees)
@@ -213,6 +219,7 @@ def calc_planet_equilibrium(flux, albedo):
     # 22% gets absorbed by the atmosphere by water vapor, dust, and ozone, and 47% gets absorbed by the surface. (so of the 69% that doesn't bounce, about 31.8% is absorbed in the atmosphere and 68.2% by the surface)
 
     earth_radius = 6378100.0  # NOTE: Manually keying this in for now because something is weird/wrong with visualizing the temperatures on a full-sized planet at the moment so I'm visualizing at radius 1.0 for the time being.
+    # NOTE: The visualization issue might possibly have been fixed when I fixed the NaN problem with xyz2latlon.
 
     planet_cross_section = np.pi * earth_radius**2
     planet_surface_area = 4 * np.pi * earth_radius**2  # Sunlight only falls on half of the surface area, however
@@ -333,7 +340,7 @@ def calc_water_equilibrium(flux):
 
 # NOTE: Initial method for assigning temperature to whole planet using only cosine of latitude and altitude (and tilt).
 @njit(cache=True, parallel=True, nogil=True)
-def assign_surface_temp(verts, altitudes, tilt, surf_watts):
+def assign_surface_temp(verts, altitudes, radius, tilt):
     """Assign starting surface temperatures based on equatorial distance and altitude."""
     # ToDo: Temps will only ever be in a range from approximately -60.0 to +60.0 C, so, what's a good dtype for that?  The world record low is approx -90 C, and the record high is approx +56 C.
     #       float16 could hold that but with little precision. float32 is probably the smallest safe choice.  I also may want room for higher and lower values than Earth produces.
@@ -361,7 +368,7 @@ def assign_surface_temp(verts, altitudes, tilt, surf_watts):
     # But ideally the latitude temps should be derived from first principles, aka solar insolation and albedo
 
     for v in prange(len(verts)):
-        lat, lon = xyz2latlon(verts[v][0], verts[v][1], verts[v][2])
+        lat, lon = xyz2latlon(verts[v][0], verts[v][1], verts[v][2], radius)
         dist_from_equator = lat - tilt
 
         # Linear dist_from_equator temp: 0 at poles, 1 at equator
@@ -401,8 +408,9 @@ def assign_surface_temp(verts, altitudes, tilt, surf_watts):
     return surface_temps
 
 
+# Insolation at the top of the atmosphere
 @njit(cache=True, parallel=True, nogil=True)
-def sample_insolation(arr, verts, rotation, tilt):  # ToDo: Test and see if modifying 'arr' in place is more performant than making an empty array and RETURNING it to the parent, where it will then be added to the insolation array.
+def sample_insolation(arr, verts, radius, rotation, tilt):  # ToDo: Test and see if modifying 'arr' in place is more performant than making an empty array and RETURNING it to the parent, where it will then be added to the insolation array.
     """Sample insolation for given points."""  # Most likely modifying in place is more performant, but by how much?
     for v in prange(len(verts)):
         x, y, z = verts[v][0], verts[v][1], verts[v][2]
@@ -424,7 +432,7 @@ def sample_insolation(arr, verts, rotation, tilt):  # ToDo: Test and see if modi
         ty = ry
         tz = rz*np.cos(tilt * np.pi/180) - rx*np.sin(tilt * np.pi/180)
 
-        lat, lon = xyz2latlon(tx, ty, tz)  # NOTE: We aren't passing a radius, so it is using the default value of 1 which might come back to bite us in the future?
+        lat, lon = xyz2latlon(tx, ty, tz, radius)
 
         # dist_from_equator = lat - tilt  # Not actually using this at the moment (or probably ever)
 
@@ -432,12 +440,11 @@ def sample_insolation(arr, verts, rotation, tilt):  # ToDo: Test and see if modi
         # NOTE: Also need to compare the distribution to the simple model in the first assign_surface_temps and see if it visually looks like the same distribution. (the numbers on the scale bar will be different, of course)
     # return max(np.cos(np.abs(lat) * np.pi/180), 0) * max(np.cos(lon * np.pi/180), 0)
 
-
-# Incredibly, if you divide the returned results by the number of rotation steps it appears to match the weighted cosine values from this NASA program:
+# Incredibly, if you divide the returned results by the number of rotation steps it appears to match the weighted cosine values from this NASA program?
 # https://data.giss.nasa.gov/modelE/ar5plots/srlocat.html
 # The insolation is off by some 20-something watts if you multiply that cosine times the solar constant, though...
-# @njit(cache=True, parallel=True, nogil=True)
-def brute_daily_insolation(verts, altitudes, tilt, surf_watts, snapshot=False):  # ToDo: This should be renamed to something like calc_instant_insolation or calc_insolation_snapshot because it will only be used to take a snapshot
+# Insolation at the top of the atmosphere
+def brute_daily_insolation(verts, altitudes, radius, tilt, snapshot=False):  # ToDo: This should be renamed to something like calc_instant_insolation or calc_insolation_snapshot because it will only be used to take a snapshot
     """Calculate insolation for each vertex of the planet."""  # of a single second in time (half of the planet lit, the other half in darkness), not an average over time.
     surface_temps = np.zeros(len(verts), dtype=np.float32)
     alt_intensity = 0  # Controls strength of altitude contribution to temp.
@@ -459,7 +466,7 @@ def brute_daily_insolation(verts, altitudes, tilt, surf_watts, snapshot=False): 
     #     rot_amt = 360.0 / rot_steps
 
     for i in range(rot_steps):
-        sample_insolation(surface_temps, verts, rotation, tilt)
+        sample_insolation(surface_temps, verts, radius, rotation, tilt)
         rotation += rot_amt
 
         if snapshot:  #ToDo: This is quite slow.
@@ -478,19 +485,20 @@ def brute_daily_insolation(verts, altitudes, tilt, surf_watts, snapshot=False): 
     return surface_temps  # ToDo: This should be renamed to something else like insolation since this function is not working with temperature.
     # return surface_temps / 360
 
-def calc_instant_insolation(verts, altitudes, tilt, rotation):
+# Insolation at the top of the atmosphere
+def calc_instant_insolation(verts, altitudes, radius, rotation, tilt):
     """Calculation the insolation for 1 second given a time of day specified by rotation."""
     insolation = np.zeros(len(verts), dtype=np.float32)
     # alt_intensity = 0  # Controls strength of altitude contribution to temp.
     # h2 = rescale(altitudes, 0, alt_intensity)
 
-    sample_insolation(insolation, verts, rotation, tilt)
+    sample_insolation(insolation, verts, radius, rotation, tilt)
 
     return insolation
 
-
+# Insolation at the top of the atmosphere
 @njit(cache=True, parallel=True, nogil=True)
-def calc_insolation_slice(radius, tilt, flux, albedo):
+def calc_insolation_slice(radius, tilt):
     """Make a slice of avg insolation at one point at each integer latitude."""
     verts = np.zeros((181, 3), dtype=np.float64)
     result = np.zeros(181, dtype=np.float32)
@@ -499,13 +507,13 @@ def calc_insolation_slice(radius, tilt, flux, albedo):
     # Therefore the array looks like [0, 1, ..., 89, 90, -90, -89, ..., -2, -1]
     # instead of continuous like [90, 89, 88, ..., 1, 0, -1, ..., -89, -90]
     for i in range(-90, 91, 1):
-        verts[i] = latlon2xyz(i, 0)
+        verts[i] = latlon2xyz(i, 0, radius)
 
     # To get more fine-grained than every integer lat we'd have to do this:
     # (but we'd lose the trick of each index being a latitude)
     # lat = 90
     # for i in range(361):
-    #     verts[i] = latlon2xyz(lat, 0)
+    #     verts[i] = latlon2xyz(lat, 0, radius)
     #     lat -= 0.5
 
     rotation = -180.0
@@ -514,7 +522,7 @@ def calc_insolation_slice(radius, tilt, flux, albedo):
     rot_amt = 360.0 / rot_steps
 
     for x in range(rot_steps): # x is an unused var. We could do something about that, like the restructure of make_ll_arr, or a while loop, but it's not strictly needed.
-        sample_insolation(result, verts, rotation, tilt)
+        sample_insolation(result, verts, radius, rotation, tilt)
         rotation += rot_amt
 
     # tmin = np.amin(result)
@@ -524,20 +532,24 @@ def calc_insolation_slice(radius, tilt, flux, albedo):
     # print(result)
     return result
 
-# NOTE: This is the fifth method using the cos of lat and lon, with working rotation and tilt. The reason for this method is performance.
-# calc_daily_insolation gives desired results but scales poorly with larger numbers of vertices and/or with more rotation steps because it calculates
-# each vertex * the number of rotation steps (V*R operations). This method, on the other hand, uses a single longitudinal slice of 181 latitude points * the number of rotation steps (181*R)
-# to build a lookup table for every latitude and then interpolates the value at each vertex instead which is a single operation per vert ((181*R)+V total operations).
-# Consequently this achieves effectively the same performance as the original assign_surface_temp which was 1 operation per vertex (V operations).
-@njit(cache=True, parallel=True, nogil=True)
-def calc_daily_insolation(verts, altitudes, tilt, lookup_table, surf_watts):
+# Insolation at the top of the atmosphere
+def calc_daily_insolation(verts, altitudes, radius, tilt):
     """Calculate insolation using a lookup table generated by the slice func."""
-    surface_temps = np.zeros(len(verts), dtype=np.float32)
+    daily_insolation = np.zeros(len(verts), dtype=np.float32)
     alt_intensity = 0  # Controls strength of altitude contribution to temp.
     h2 = rescale(altitudes, 0, alt_intensity)
 
+    lookup_table = calc_insolation_slice(radius, tilt)
+    interpolate_insolation(verts, lookup_table, daily_insolation, radius)
+
+    return daily_insolation
+
+# Insolation at the top of the atmosphere
+@njit(cache=True, parallel=True, nogil=True)
+def interpolate_insolation(verts, lookup_table, insolation, radius):
+    """Interpolate insolation using a lookup table generated by the slice func."""
     for v in prange(len(verts)):
-        lat, _ = xyz2latlon(verts[v][0], verts[v][1], verts[v][2])
+        lat, _ = xyz2latlon(verts[v][0], verts[v][1], verts[v][2], radius)
         lower = int(np.floor(lat))
         upper = int(np.ceil(lat))
 
@@ -547,31 +559,28 @@ def calc_daily_insolation(verts, altitudes, tilt, lookup_table, surf_watts):
             print("upper:", upper)
 
         if lower == upper:
-            surface_temps[v] = lookup_table[lower]
+            insolation[v] = lookup_table[lower]
         else:
             # https://www.geeksforgeeks.org/how-to-implement-linear-interpolation-in-python
             # Given 2 coordinates (lower, upper) and the values at those coordinates (lookup_table)..
             # and given a 3rd coordinate (lat) that lies between them..
             # find the interpolated value at the 3rd coordinate.
-            surface_temps[v] = lookup_table[lower] + (lat - lower) * ((lookup_table[upper]-lookup_table[lower]) / (upper-lower))
+            insolation[v] = lookup_table[lower] + (lat - lower) * ((lookup_table[upper]-lookup_table[lower]) / (upper-lower))
 
-    # tmin = np.amin(surface_temps)
-    # tmax = np.amax(surface_temps)
+    # tmin = np.amin(insolation)
+    # tmax = np.amax(insolation)
     # print("  Applied slice min is", tmin)
     # print("  Applied slice max is", tmax)
-    return surface_temps
+    # return insolation
 
-def calc_yearly_insolation(world_radius, axial_tilt, tsi, world_albedo, points, height, snapshot=False):
+def calc_yearly_insolation(points, height, radius, axial_tilt, snapshot=False):
     """Calculate average insolation for a full year."""
-    # A "year" being 1 full revolution, measured at 360 points.
+    # A "year" being 1 full revolution, measured in 1 degree increments.
     annual_insolation = np.zeros(len(points), dtype=np.float32)
 
     for x in range(360):
         current_tilt = calculate_seasonal_tilt(axial_tilt, x)
-
-        longitude_slice = calc_insolation_slice(world_radius, current_tilt, tsi, world_albedo)
-        insolation = calc_daily_insolation(points, height, current_tilt, longitude_slice, tsi)
-
+        insolation = calc_daily_insolation(points, height, radius, current_tilt)
         annual_insolation += insolation
 
         if snapshot:
@@ -585,6 +594,7 @@ def calc_yearly_insolation(world_radius, axial_tilt, tsi, world_albedo, points, 
     return annual_insolation
 
 
+# Broken stuff that doesn't work right.
 def calc_hour_angle_insolation(tsi):
     """Solar flux at specific latitude, time, and day of year"""
 
