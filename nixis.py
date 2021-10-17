@@ -58,8 +58,13 @@ from climate import *
 #    https://stackoverflow.com/questions/60077079/how-can-i-disable-numba-debug-logging-when-debug-env-variable-is-set
 # - Maybe some fancy progress bars. https://tqdm.github.io/
 
+# Style guide:
+# - For functions that need mesh data like the vertices, the vertices should be the first parameter.
+# - If the function takes an array that is indexed to the vertices, such as height or temperature, that should be the second parameter.
+# - If it takes more than one array then those should be given in an order of importance that resembles the order in which they were created, such as height, then insolation, then temperature, then precipitation
+
 class NixisPlanet:
-    """Base class for Nixis planets."""
+    """Base class for Nixis planets."""  # This may or may not actually get used any time soon.
     def __init__(self):
         radius = None
         orbit_distance = None
@@ -125,7 +130,7 @@ def main():
     else:
         seed_rng = np.random.default_rng()
         world_seed = int(seed_rng.integers(low=0, high=999999))
-        # world_seed = int(seed_rng.integers(low=-999999, high=999999))
+        # world_seed = int(seed_rng.integers(low=-999999, high=999999))  # Negative numbers work fine, apparently
         # rng = np.random.default_rng(i)
         # rng.random()
 
@@ -159,17 +164,18 @@ def main():
     img_height = options["img_height"]
     export_list = options["export_list"]
 
-    test_latlon = False
+    test_latlon = True
 
     do_erode = False
-    do_climate = True
+    do_climate = False
 
     snapshot_erosion = False
     snapshot_climate = False
 
-    # ToDo: For both of the below we should possibly only try making the dir at the moment we save.
+    # ToDo: For both of the below we should possibly only try making the dir at the moment we save?
     # Test if the directory already exists. Maybe even attempt to see if we have write permission beforehand.
     # Actual exception types
+    # if args.png or args.mesh or args.pointcloud or args.database or args.config:
     try:
         os.mkdir(cfg.SAVE_DIR)
     except:
@@ -204,7 +210,7 @@ def main():
     now = time.localtime()
     print("==============================")
     print("World seed:", world_seed)
-    print(f"Script started at: {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}")
+    print("\n" + f"Script started at: {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}" + "\n")
 
     points, cells = create_mesh(divisions)
     if world_radius != 1:
@@ -220,9 +226,9 @@ def main():
     #     a, b = create_mesh(i)
     #     save_mesh(a, b, cfg.SAVE_DIR, f"{i:02}" + '_smooth')
 
-# Saving the mesh here just writes a plain sphere with no elevation offsets (for debug)
-    if args.mesh:
-        save_mesh(points, cells, cfg.SAVE_DIR, world_name + '_smooth')
+    # Saving the mesh here just writes a plain sphere with no elevation offsets (for debug)
+    # if args.mesh:
+    #     save_mesh(points, cells, cfg.SAVE_DIR, world_name + '_smooth')
 
 # Prepare KD Tree and stuff for image saving
 # =============================================
@@ -236,7 +242,7 @@ def main():
         build_KDTree(points)
         kdt_end = time.perf_counter()
         # For each pixel's 3D coordinates, this is the 3 nearest vertices, and the distances to said vertices.
-        # The name kinda sucks though. Maybe I could rename it img_pixel_neighbors.
+        # The name kinda sucks though. Maybe we could rename it img_pixel_neighbors.
         cfg.IMG_QUERY_DATA = cfg.KDT.query(ll, k=3, workers=-1)
         query_end = time.perf_counter()
 
@@ -251,10 +257,7 @@ def main():
 # Sample noise
 # =============================================
     # Initialize the permutation arrays to be used in noise generation
-    time_start = time.perf_counter()
-    perm, pgi = osi.init(world_seed)
-    time_end = time.perf_counter()
-    print(f"Time to init permutation arrays: {time_end - time_start :.5f} sec")
+    perm, pgi = osi.init(world_seed)  # Very fast. 0.02 secs or better
 
     # Ocean altitude is a *relative* percent (expressed as a decimal) of the max altitude
     # e.g. 0.4 would set the ocean to 40% of the height from the min to max altitude.
@@ -272,17 +275,23 @@ def main():
     # For reference, Mt. Everest is ~8848.86 m above sea level, the lowest land is the Dead Sea at -428 m below sea level, and the Mariana Trench has a depth of at least -10984 m below sea level. "Average" ocean floor is ~3.8 km.
     print("Sampling noise...")
 
-    height = sample_octaves(points, None, perm, pgi, n_octaves, n_init_rough, n_init_strength, n_roughness, n_persistence, ocean_percent, world_radius)  # ToDo: Consider pulling these values from seed json file cuz this line is a long boi now.
+    # ToDo: Consider pulling arg values from cfg.py, options.json, seed json file, or as kwargs because this line is a long boi now.
+    height = sample_octaves(points, None, perm, pgi, n_octaves, n_init_rough, n_init_strength, n_roughness, n_persistence, ocean_percent, world_radius)
 
     height = rescale(height, -0.05, 0.15)
 #    height = rescale(height, -4000, 8850)
 #    height = rescale(height, -4000, 0, 0, mode='lower')
 #    height = rescale(height, 0, 8850, 0, mode='upper')
 
+
+    # ToDo: Multiply the rescaled height times the world radius?
     minval = np.amin(height)
     maxval = np.amax(height)
+    print("  Rescaled min:", minval)
+    print("  Rescaled max:", maxval)
+
     # https://math.stackexchange.com/questions/2110160/find-percentage-value-between-2-numbers
-    # ocean_level = minval + ((maxval - minval) * 50 / 100)  # If I want to input percentage as an integer between 0 and 100 we need the divide by 100 step
+    # ocean_level = minval + ((maxval - minval) * 50 / 100)  # If I want to input percentage as an integer between 0 and 100 we need the divide by 100 step (50 would be 50%; replace that number with a variable)
     ocean_level = minval + ((maxval - minval) * ocean_percent)  # Or this way to just input a decimal percent. NOTE: Due to the way np.clip works, values less than 0% or greater than 100% have no effect.
     print("  Ocean Level:", ocean_level)
 
@@ -291,10 +300,11 @@ def main():
     # height += 400000
     # height += world_radius - 1
 
-    height = np.clip(height, ocean_level, maxval)  # Hack for showing an ocean level in pyvista
+    # height = np.clip(height, ocean_level, maxval)  # Hack for showing an ocean level in pyvista.  It might be time to try using a 2nd sphere mesh just for water, and use masks with the scalars or something so underwater areas don't bungle the height colormap.
 
-    print("  min:", minval)
-    print("  max:", maxval)
+    height -= ocean_level  # Move the ocean level to 0; need to rescale the upper and lower halves again to regain proper min and max altitudes.
+
+    # height *= world_radius  # Keeps the scale relative
 
     if args.png and not do_erode:
         export_list["height"] = height
@@ -318,7 +328,7 @@ def main():
         # the mask and becomes part of the land points.
 
         erode_start = time.perf_counter()
-        erode_terrain3(points, neighbors, height, num_iter=11, snapshot=snapshot_erosion)
+        erode_terrain3(points, neighbors, height, num_iter=11, snapshot=snapshot_erosion)  # ToDo: Placing the neighbors before the height probably violates my style guide.
         erode_end = time.perf_counter()
         print(f"Erosion runtime: {erode_end-erode_start:.5f}")
 
@@ -329,6 +339,9 @@ def main():
 
 # Climate Stuff
 # =============================================
+    axial_tilt = 23.44
+    current_tilt = calculate_seasonal_tilt(axial_tilt, 36)
+
     if do_climate:
 
         # Calculate the solar constant at the planet's orbit
@@ -343,12 +356,9 @@ def main():
         # ====================
         # NOTE: The original temperature assignment code
 
-        axial_tilt = 23.44
-        current_tilt = calculate_seasonal_tilt(axial_tilt, 0)
-
         print("Assigning starting temperatures...")
         temp_start = time.perf_counter()
-        surface_temps = assign_surface_temp(points, height, current_tilt, tsi)
+        surface_temps = assign_surface_temp(points, height, world_radius, current_tilt)
         temp_end = time.perf_counter()
         print(f"Assign surface temps runtime: {temp_end-temp_start:.5f} sec")
 
@@ -360,11 +370,11 @@ def main():
         # calc_hour_angle_insolation(tsi)
 
         # NOTE: Instant insolation
-        instant = False
-        if instant:
+        do_instant = True
+        if do_instant:  # ToDo: Work out the relationship between time of day and rotation at any longitude so we can specify a time at a location and automatically rotate by the correct amount.
             print("Calculating solar insolation snapshot in time...")
             temp_start = time.perf_counter()
-            insol_2 = calc_instant_insolation(points, height, current_tilt, 0)
+            insol_2 = calc_instant_insolation(points, height, world_radius, 0, current_tilt)
             temp_end = time.perf_counter()
             print(f"Runtime: {temp_end-temp_start:.5f} sec")
             if args.png:
@@ -373,8 +383,7 @@ def main():
         # NOTE: Version '2.5'
         print("Calculating daily solar insolation (slice method)...")
         temp_start = time.perf_counter()
-        longitude_slice = calc_insolation_slice(world_radius, current_tilt, tsi, world_albedo)  # These two lines
-        daily_insolation = calc_daily_insolation(points, height, current_tilt, longitude_slice, tsi)   # should be combined into one function named calc_daily_insolation
+        daily_insolation = calc_daily_insolation(points, height, world_radius, current_tilt)
         temp_end = time.perf_counter()
         print(f"Runtime: {temp_end-temp_start:.5f} sec")
 
@@ -382,14 +391,16 @@ def main():
         if args.png:
             export_list["daily_insolation"] = daily_insolation
 
-        print("Calculating annual solar insolation (slice method)...")
-        temp_start = time.perf_counter()
-        annual_insolation = calc_yearly_insolation(world_radius, axial_tilt, tsi, world_albedo, points, height, snapshot_climate)
-        temp_end = time.perf_counter()
-        print(f"Runtime: {temp_end-temp_start:.5f} sec")
+        do_annual = False
+        if do_annual:
+            print("Calculating annual solar insolation (slice method)...")
+            temp_start = time.perf_counter()
+            annual_insolation = calc_yearly_insolation(points, height, world_radius, axial_tilt, snapshot_climate)
+            temp_end = time.perf_counter()
+            print(f"Runtime: {temp_end-temp_start:.5f} sec")
 
-        if args.png:
-            export_list["annual_insolation"] = annual_insolation
+            if args.png:
+                export_list["annual_insolation"] = annual_insolation
 
         # calc_equilibrium_temp()
 
@@ -397,19 +408,19 @@ def main():
 # Build KD Tree (and test query to show points on surface)
 # =============================================
     if test_latlon:
-        llpoint = latlon2xyz(20, 10)
+        llpoint = latlon2xyz(20, 15, world_radius)
         if cfg.KDT is None:
             build_KDTree(points)
 
         print("Querying KD Tree for neighbors...")
         query_start = time.perf_counter()
-        distances, neighbors = cfg.KDT.query(llpoint, 3)
+        lldistances, llneighbors = cfg.KDT.query(llpoint, 3)
         query_end = time.perf_counter()
         print(f"Query finished in {query_end - query_start :.5f} sec")
 
-        print("neighbors:", neighbors)
-        print("neighbor distances:", distances)
-        print("neighbor xyz:", points[neighbors[0]], points[neighbors[1]], points[neighbors[2]])
+        print("neighbors:", llneighbors)
+        print("neighbor distances:", lldistances)
+        print("neighbor xyz:", points[llneighbors[0]], points[llneighbors[1]], points[llneighbors[2]])
 
 # Save the world map to a texture file
 # =============================================
@@ -434,11 +445,11 @@ def main():
 # =============================================
     runtime_end = time.perf_counter()
     now = time.localtime()
-    print(f"Computation finished at: {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}")
-    print(f"Script runtime: {runtime_end - runtime_start:.3f} seconds")
+    print("\n" + f"Computation finished at: {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}")
+    print(f"Script runtime: {runtime_end - runtime_start:.3f} seconds" + "\n")
 
     print("Preparing visualization...")
-#    visualize(points, cells, height, search_point=llpoint, neighbors=neighbors, tilt=current_tilt)
+    # visualize(points, cells, height, search_point=llpoint, neighbors=llneighbors, radius=world_radius, tilt=current_tilt)
 #    visualize(points * (np.reshape(height, (len(points), 1)) + 1), cells, height, tilt=current_tilt)  # NOTE: Adding +1 to height means values only grow outward if range is 0-1. But for absolute meter ranges it merely throws the values off by 1.
 
     # NOTE: Adding +1 to height means values only grow outward if range is 0-1. But for absolute meter ranges it merely throws the values off by 1.
@@ -446,10 +457,19 @@ def main():
     # I think it's Verts * (1 + H/R)
     # points *= np.reshape(height + 1 + world_radius - 1, (len(points), 1))  # So, not this way
 
+    # print("Before points")
+    # print(points)
+
+    # Reshaping the heights to match the shape of the vertices array so we can multiply the verticies * the heights.
     points *= np.reshape(height/world_radius + 1, (len(points), 1))  # Rather, do it this way instead
-    # visualize(points, cells, surface_temps, tilt=current_tilt)
-    # visualize(points, cells, temps_3, tilt=current_tilt)
-    visualize(points, cells, annual_insolation, tilt=current_tilt)
+
+    # print("After points")
+    # print(points)
+
+    if test_latlon:
+        visualize(points, cells, height, search_point=llpoint, neighbors=llneighbors, radius=world_radius, tilt=current_tilt)
+    else:
+        visualize(points, cells, height, radius=world_radius, tilt=current_tilt)
 
     # ToDo: PyVista puts execution 'on hold' while it visualizes. After the user closes it execution resumes.
     # Consider asking the user right here if they want to save out the result as a png/mesh/point cloud.
@@ -473,8 +493,10 @@ def sample_noise(verts, perm, pgi, n_roughness=1, n_strength=0.2, radius=1):
     for v in prange(len(rough_verts)):
         elevations[v] = osi.noise3d(rough_verts[v][0], rough_verts[v][1], rough_verts[v][2], perm, pgi)
 
-    # print("Pre-elevations:")
+    # print(" Pre-elevations:")
     # print(elevations)
+    # print(" min:", np.amin(elevations))
+    # print(" max:", np.amax(elevations))
     return (elevations + 1) * 0.5 * n_strength * radius  # NOTE: I'm not sure if multiplying by the radius is the proper thing to do in my next implementation.
     # return elevations
 
@@ -504,12 +526,12 @@ def sample_octaves(verts, elevations, perm, pgi, n_octaves=1, n_init_roughness=1
     # time_end = time.perf_counter()
     # print(f"  Time to find numpy min: {time_nmax - time_nmin :.5f} sec")
     # print(f"  Time to find numpy max: {time_end - time_nmax :.5f} sec")
-    print("  min:", emin)
-    print("  max:", emax)
+    print("  Combined octaves min:", emin)
+    print("  Combined octaves max:", emax)
     return elevations
 
 
-def visualize(verts, tris, heights=None, search_point=None, neighbors=None, tilt=0.0):
+def visualize(verts, tris, heights=None, search_point=None, neighbors=None, radius=1.0, tilt=0.0):
     """Visualize the output."""
     # pyvista expects that faces have a leading number telling it how many
     # vertices a face has, e.g. [3, 0, 11, 5] where 3 means triangle.
@@ -528,20 +550,21 @@ def visualize(verts, tris, heights=None, search_point=None, neighbors=None, tilt
     if search_point is not None and neighbors is not None:
         # Is it strictly necessary that these be np.arrays?
 #        neighbor_dots = pv.PolyData(np.array([verts[neighbors[0]], verts[neighbors[1]], verts[neighbors[2]]]))
-        neighbor_dots = pv.PolyData(neighbors)
+#        neighbor_dots = pv.PolyData(neighbors)
+        neighbor_dots = pv.PolyData(np.array([verts[v] for v in neighbors]))
         search_dot = pv.PolyData(np.array(search_point))
-    x_axisline = pv.Line([-1.5,0,0],[1.5,0,0])
-    y_axisline = pv.Line([0,-1.5,0],[0,1.5,0])
-    z_axisline = pv.Line([0,0,-1.5],[0,0,1.5])
+    x_axisline = pv.Line([-1.5*radius,0,0],[1.5*radius,0,0])
+    y_axisline = pv.Line([0,-1.5*radius,0],[0,1.5*radius,0])
+    z_axisline = pv.Line([0,0,-1.5*radius],[0,0,1.5*radius])
 
     # Axial tilt line
-    # ax, ay, az = latlon2xyz(tilt, 45)
-    ax, ay, az = latlon2xyz(tilt, 0)
+    # ax, ay, az = latlon2xyz(tilt, 45, radius)
+    ax, ay, az = latlon2xyz(tilt, 0, radius)
     t_axisline = pv.Line([0,0,0], [ax * 1.5, ay * 1.5, az * 1.5])
 
     # Sun tilt line (line that is perpendicular to the incoming solar flux)
-    # ax, ay, az = latlon2xyz(90-tilt, -135)
-    ax, ay, az = latlon2xyz(90-tilt, 180)
+    # ax, ay, az = latlon2xyz(90-tilt, -135, radius)
+    ax, ay, az = latlon2xyz(90-tilt, 180, radius)
     s_axisline = pv.Line([0,0,0], [ax * 1.5, ay * 1.5, az * 1.5])
 
 
@@ -568,6 +591,7 @@ def visualize(verts, tris, heights=None, search_point=None, neighbors=None, tilt
     pl.add_mesh(t_axisline, line_width=5, color = "magenta")
     pl.add_mesh(s_axisline, line_width=5, color = "yellow")
     pl.show_axes()
+    pl.enable_terrain_style(mouse_wheel_zooms=True)  # Use turntable style navigation
     print("Sending to PyVista.")
     pl.show()
 
