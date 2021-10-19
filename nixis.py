@@ -16,6 +16,7 @@ import pyvista as pv
 import opensimplex as osi
 import cfg
 from util import *
+from terrain import sample_octaves
 from erosion import *
 from climate import *
 # pylint: disable=not-an-iterable
@@ -206,6 +207,7 @@ def main():
 
 # Start the party
 # =============================================
+# =============================================
     runtime_start = time.perf_counter()
     now = time.localtime()
     print("==============================")
@@ -254,7 +256,7 @@ def main():
         print(f"  Query finished in {query_end - kdt_end :.5f} sec")
 
 
-# Sample noise
+# Sample noise for initial terrain heights
 # =============================================
     # Initialize the permutation arrays to be used in noise generation
     perm, pgi = osi.init(world_seed)  # Very fast. 0.02 secs or better
@@ -292,7 +294,7 @@ def main():
 
     # https://math.stackexchange.com/questions/2110160/find-percentage-value-between-2-numbers
     # ocean_level = minval + ((maxval - minval) * 50 / 100)  # If I want to input percentage as an integer between 0 and 100 we need the divide by 100 step (50 would be 50%; replace that number with a variable)
-    ocean_level = minval + ((maxval - minval) * ocean_percent)  # Or this way to just input a decimal percent. NOTE: Due to the way np.clip works, values less than 0% or greater than 100% have no effect.
+    ocean_level = minval + ((maxval - minval) * ocean_percent)  # Or this way to just input a decimal percent. NOTE: Due to the way np.clip works (hack below), values less than 0% or greater than 100% have no effect.
     print("  Ocean Level:", ocean_level)
 
     # height *= 10
@@ -300,11 +302,28 @@ def main():
     # height += 400000
     # height += world_radius - 1
 
-    # height = np.clip(height, ocean_level, maxval)  # Hack for showing an ocean level in pyvista.  It might be time to try using a 2nd sphere mesh just for water, and use masks with the scalars or something so underwater areas don't bungle the height colormap.
+    height = np.clip(height, ocean_level, maxval)  # Hack for showing an ocean level in pyvista.  It might be time to try using a 2nd sphere mesh just for water, and use masks with the scalars or something so underwater areas don't bungle the height colormap.
+    # Also this clipping should probably be one of the last steps before visualizing.
 
-    height -= ocean_level  # Move the ocean level to 0; need to rescale the upper and lower halves again to regain proper min and max altitudes.
+    # height -= ocean_level  # Move the ocean level to 0; need to rescale the upper and lower halves again to regain proper min and max altitudes.
 
-    # height *= world_radius  # Keeps the scale relative
+    # height = rescale(height, -0.05, 0.15, mid=0)
+    # minval = np.amin(height)
+    # maxval = np.amax(height)
+    # print("  Rescaled min:", minval)
+    # print("  Rescaled max:", maxval)
+
+    # height = np.clip(height, 0, maxval)  # Can use 0 instead of ocean_level because we already rescaled right above here. Note that this has the effect of making the upper half steeper and the lower half flatter as the original bounds are restored.
+    # NOTE: Maybe instead of subtracting the ocean level and doing another rescale, instead we only do that when multiplying the height times the vertices for the final viz.
+    # The heights exist independently of the vertices until then. The main goal has been to get the sea level to match the sphere's radius.
+    # The main issue is that the ocean level in the heights won't be 0, then. It will match the radius but will be higher than 0.
+    # I think at the end of the day I need to implement a curve/power function for the rescaling like in that paper I can't find anymore, or RedBlob, to control the 'falloff' of the rescaling.
+    # In RedBlob's example it's a simple power like for x in height: x = x**3, or x = (x * fudge_factor)**3, where powers between 0.1 to 1 will raise the middle elevations up towards mountain peaks and powers > 1 (like 3) push mids down into valley floors.
+    # It should be noted that the simple power function only works properly when values are between 0 and 1, otherwise values > 1 will shoot off into space or be smashed down.
+    # So getting the terrain curves right is probably going to require multiple wacky rescale operations.
+    # Continental shelves are probably going to need a power < 1 to raise them close to the land level, but ocean floor after the shelf will need a power > 1 to lower and flatten it with falloff from the shelf. Land needs a power > 1 to slope upward from coasts.
+
+    # height *= world_radius  # Keeps the scale relative. NOTE: But don't multiply here, because that messes up the display of the scalar bar in pyvista. Instead, do this multiplication down inside the visualize function.
 
     if args.png and not do_erode:
         export_list["height"] = height
@@ -461,7 +480,8 @@ def main():
     # print(points)
 
     # Reshaping the heights to match the shape of the vertices array so we can multiply the verticies * the heights.
-    points *= np.reshape(height/world_radius + 1, (len(points), 1))  # Rather, do it this way instead
+    # points *= np.reshape(height/world_radius + 1, (len(points), 1))  # Rather, do it this way instead. NOTE: This should really be done inside the visualize function.
+    points *= np.reshape((height-ocean_level)/world_radius + 1, (len(points), 1))  # Rather, do it this way instead. NOTE: This should really be done inside the visualize function.
 
     # print("After points")
     # print(points)
@@ -481,54 +501,6 @@ def main():
     # temp_path = os.path.join(cfg.SAVE_DIR, world_name + '_config.' + options["settings_format"])
     # if os.path.exists(temp_path):
     #     os.remove(temp_path)
-
-
-@njit(cache=True, parallel=True, nogil=True)
-def sample_noise(verts, perm, pgi, n_roughness=1, n_strength=0.2, radius=1):
-    """Sample a simplex noise for given vertices."""
-    elevations = np.ones(len(verts))
-
-    rough_verts = verts * n_roughness
-
-    for v in prange(len(rough_verts)):
-        elevations[v] = osi.noise3d(rough_verts[v][0], rough_verts[v][1], rough_verts[v][2], perm, pgi)
-
-    # print(" Pre-elevations:")
-    # print(elevations)
-    # print(" min:", np.amin(elevations))
-    # print(" max:", np.amax(elevations))
-    return (elevations + 1) * 0.5 * n_strength * radius  # NOTE: I'm not sure if multiplying by the radius is the proper thing to do in my next implementation.
-    # return elevations
-
-
-def sample_octaves(verts, elevations, perm, pgi, n_octaves=1, n_init_roughness=1.5, n_init_strength=0.4, n_roughness=2.0, n_persistence=0.5, ocean_percent=0.5, world_radius=1.0):
-    """Sample octaves of noise and combine them together."""
-    if elevations is None:
-        elevations = np.zeros(len(verts))
-    n_freq = n_init_roughness  # Frequency
-    n_amp = n_init_strength  # Amplitude
-    # In my separate-sampling experiment, rough/strength pairs of (1.6, 0.4) (5, 0.2) and (24, 0.02) were good for 3 octaves
-    # The final 3 results were added and then multiplied by 0.4
-    for i in range(n_octaves):
-        print(f"\r  Octave {i+1}..", flush =True, end ='')
-        time_start = time.perf_counter()
-        elevations += sample_noise(verts, perm, pgi, n_freq / world_radius, n_amp / world_radius, world_radius)
-        n_freq *= n_roughness
-        n_amp *= n_persistence
-        time_end = time.perf_counter()
-        print(f" {time_end - time_start :.5f} sec")
-
-
-    # time_nmin = time.perf_counter()
-    emin = np.amin(elevations)
-    # time_nmax = time.perf_counter()
-    emax = np.amax(elevations)
-    # time_end = time.perf_counter()
-    # print(f"  Time to find numpy min: {time_nmax - time_nmin :.5f} sec")
-    # print(f"  Time to find numpy max: {time_end - time_nmax :.5f} sec")
-    print("  Combined octaves min:", emin)
-    print("  Combined octaves max:", emax)
-    return elevations
 
 
 def visualize(verts, tris, heights=None, search_point=None, neighbors=None, radius=1.0, tilt=0.0):
