@@ -203,7 +203,7 @@ def make_ll_arr(width, height):
     # Each pixel that will compose the exported world map has its own lat/lon.
     map_array = np.ones((height, width, 3), dtype=np.float64)
     lat = 90
-    lon = 180
+    lon = -180
     latpercent = 180 / (height - 1)
     # lonpercent = 360 / (width - 1)
     lonpercent = 360 / width  # ToDo: Fix hairline seam where the image wraps around the sides. We don't actually want to reach -180 because it's the same as +180. (Might not be an issue at higher subdivisions >= 900)
@@ -213,7 +213,7 @@ def make_ll_arr(width, height):
         # Loop through each Longitude per latitude.
         for w in prange(width):
             # Take the pixel's lat/lon and get its 3D coordinates
-            d = latlon2xyz(max(lat - (h * latpercent), -90), max(lon - (w * lonpercent), -180))
+            d = latlon2xyz(max(lat - (h * latpercent), -90), max(lon + (w * lonpercent), -180))
             map_array[h][w] = d
     return map_array
 
