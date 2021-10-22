@@ -55,3 +55,16 @@ def sample_octaves(verts, elevations, perm, pgi, n_octaves=1, n_init_roughness=1
     print("  Combined octaves min:", emin)
     print("  Combined octaves max:", emax)
     return elevations
+
+@njit(cache=True, parallel=True, nogil=True)
+def make_ocean_mask(height, ocean_level):
+    """Create an ocean mask from an array of heights and the ocean level."""
+    # NOTE: Some other functions may not like that a dtype of bool_ stores "True" or "False" instead of numbers.
+    # Keep an eye on that. We can always switch to int8 or uint8 and store 0 or 1 if we need to.
+    mask = np.zeros(len(height), dtype=np.bool_)
+
+    for h in prange(len(height)):
+        if height[h] <= ocean_level:
+            mask[h] = 1
+
+    return mask
