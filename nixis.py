@@ -446,10 +446,13 @@ def main():
     if args.png:
         print("Saving world map image...")
 
+        # ToDo: 16-bit images (rescale 0-65535 and save support in the save_image util function)
+        # (For RGB this may require abandoning the pillow library but for grayscale pillow should still work)
         for key, array in export_list.items():
-            # print("before heights:", height)
-            export_list[key] = rescale(array, 0, 255)
-            # print("after heights: ", np.round(f_rescale.astype(int)))
+            if array.dtype in ('int8', 'uint8', 'bool_'):  # uint8 is technically safe for rescale between 0-255
+                export_list[key] = rescale(array.astype(np.float64), 0, 255)
+            else:
+                export_list[key] = rescale(array, 0, 255)
 
         pixel_data = build_image_data(export_list)
         save_start = time.perf_counter()
