@@ -1,5 +1,5 @@
 # Nixis
-A python program for generating planet-scale maps for spherical worlds.
+A python program for procedurally generating planet-scale maps for spherical worlds.
 
 While there are many existing tools (such as [Gaea](https://quadspinner.com/), [TerreSculptor](http://www.demenzunmedia.com/home/terresculptor/), [World Machine](https://www.world-machine.com/), and [World Creator](https://www.world-creator.com/)) that can create plausibly realistic-looking terrain for small areas (a few kilometers squared) there are few to none that do so for a full-sized spherical planet.  In this instance "plausibly realistic-looking" refers to a terrain that incorporates principles of hydraulic erosion and weathering such that it resembles real terrain that has been acted upon by these natural forces over time.  Existing tools that apply erosion algorithms on small or flat terrains are not programmed to compensate for the distortion that is introduced by mapping a sphere onto a rectangular image.
 
