@@ -5,7 +5,7 @@ While there are many existing tools (such as [Gaea](https://quadspinner.com/), [
 
 ## What This Project Is
 * The goal of this project is to use principles of hydraulic erosion and tectonic activity to create large-scale features like continents, mountain chain distributions, rivers, and water sheds that appear believable at planetary scales on a spherical planet. 
-* Given that the objective is planetary scales, the size of the smallest feature is not expected to be smaller than about one kilometer or a few kilometers per pixel.  See NASA's Blue Marble full Earth topography and bathymetry maps for reference.
+* Given that the objective is planetary scales, the size of the smallest feature is not expected to be smaller than about one kilometer or a few kilometers per pixel.  See NASA's Visible Earth (Blue Marble) [topography](https://visibleearth.nasa.gov/images/73934/topography) and [bathymetry](https://visibleearth.nasa.gov/images/73963/bathymetry) maps for reference.
 * The output of the tool is saved as a series of [equirectangular texture maps](https://en.wikipedia.org/wiki/Equirectangular_projection) that can be used in 3D graphics applications such as Maya, Blender, Unreal Engine, Unity, etc. for video game graphics, visual effects, or animation. 
 
 ## What This Project *Is Not*
