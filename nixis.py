@@ -12,11 +12,12 @@ import time
 import numpy as np
 from numba import njit, prange
 import pyvista as pv
+from matplotlib.colors import LinearSegmentedColormap
 # from scipy.spatial import KDTree
 import opensimplex as osi
 import cfg
 from util import *
-from terrain import sample_octaves
+from terrain import sample_octaves, make_mask
 from erosion import *
 from climate import *
 # pylint: disable=not-an-iterable
@@ -43,8 +44,21 @@ from climate import *
 #    This would mean there is less flexibility in choosing what level of subdivision to use when creating worlds but it might save on computation time and possibly on RAM since we don't have to make various copies
 #    of arrays to build adjacency and such.  Maybe not so useful while I'm building the program but it could be useful once the program is 'production ready'.
 #    I could optionally ship the program with precomputed arrays for download or include a precompute_arrays() function so the user can do it themselves (depending on how large the arrays are.. they'd probably be huge on disk)
-#    so they only need to precompute once.
-# - Find out which takes up more bytes in RAM: color represented as RGB, HSV, or hex value, and if the 'winner' at a bit depth of 8 is still the winner at 16 or higher.
+#    so they only need to precompute once.  Numpy has its own .npy and .npz formats, but of course they have to be read into RAM to actually use them. It could still be useful to juggle what is in RAM at any moment if things aren't needed.
+#
+# - Find out which takes up more bytes in RAM: color represented as RGB, HSV, or hex value, and if the 'winner' at a bit depth of 8 is still the winner at 16 or higher. (NOTE: I don't think hex can do > 8 bits)
+#    I haven't looked into this, yet, but if each channel gets its own separate number that would be 3*N bytes times V number of verts.
+#    For example a numpy float32 or int32 array is 4 bytes per item or 3*4*V, and a float64 or int64 array is 8 bytes per item or 3*8*V
+#    1 byte:  bool_, int8, uint8
+#    2 bytes: float16, int16, uint16
+#    4 bytes: float32, int32, uint32
+#    8 bytes: float64, int64, uint64
+#    32 or 64 would be overkill for tracking 16 bits per channel, which is commonly stored as integer values, and covers a range of 0-65535, which matches the range of uint16; so 16-bits per channel would be 3 * 2 bytes * V
+#    https://petebankhead.gitbooks.io/imagej-intro/content/chapters/bit_depths/bit_depths.html
+#    There is also the option of floating point numbers which are used in HDR and such but that may be harder to work with and I'm not sure how much compatibility there is in common image editors.
+#    Another possibility is to use a palette, like a gif, instead of full RGB saved per vertex. The vertex would store a number between 0-255, for example, and that index would look up the real RGB values in a palette with 256 colors.
+#    A palette is something that will definitely be used for the simple map types like Biome, Climate, Metals, etc. because there are a limited number of biomes to choose from in a Whittaker diagram or Koppen climate classification.
+#
 # - All important variables for things like tectonics, erosion, and climate need to be 'ratios' that are resolution and radius-independent.  So they will all be related to the distance between vertices, which is affected by radius and subdivisions.
 # - Far future idea: This would practically be it's own implementation, but it might be possible to take only a smaller square/rect slice of a given planet to export at a higher resolution.
 #    Use the latlon2xyz to make a grid from a min/max lat and lon, then build the triangulated connectivity basically the same way Sebastian Lague does it. With enough octaves the opensimplex will have detail down to that level.
@@ -112,19 +126,19 @@ def main():
     if args.divisions <= 0:
         print("\n" + "Divisions must be an even, positive integer." + "\n")
         sys.exit(0)
-    if args.divisions > 2250:
-        print("\n" + "WARNING. Setting divisions to a large value can use gigabytes of RAM.")
-        print("         The 3D mesh will have (divisions * divisions * 10 + 2) vertices.")
-        print("         The 3D mesh will have (divisions * divisions * 20) triangles.")
-        print("         Simulation will also take proportionately longer." + "\n")
-        confirm = input("Continue anyway? Y/N: ")
-        if confirm.lower() not in ('y', 'yes'):
-            sys.exit(0)
     if (args.divisions % 2) == 0:
         divisions = args.divisions
     else:
         divisions = args.divisions + 1
         print(f"Even numbers only for divisions, please. Setting divisions to {divisions}.")
+    if args.divisions > 2250:
+        print("\n" + "WARNING. Setting divisions to a large value can use gigabytes of RAM.")
+        print(f"         The 3D mesh will have {divisions * divisions * 10 + 2:,} vertices.")
+        print(f"         The 3D mesh will have {divisions * divisions * 20:,} triangles.")
+        print("         Simulation will also take proportionately longer." + "\n")
+        confirm = input("Continue anyway? Y/N: ")
+        if confirm.lower() not in ('y', 'yes'):
+            sys.exit(0)
 
     if args.seed:
         world_seed = args.seed
@@ -165,7 +179,7 @@ def main():
     img_height = options["img_height"]
     export_list = options["export_list"]
 
-    test_latlon = True
+    test_latlon = False
 
     do_erode = False
     do_climate = False
@@ -214,14 +228,15 @@ def main():
     print("World seed:", world_seed)
     print("\n" + f"Script started at: {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}" + "\n")
 
-    points, cells = create_mesh(divisions)
+    # NOTE: For k=2500 the mesh takes 17 seconds to build. For k=5000 it takes 69 seconds. For k=7500 it takes 159 seconds.
+    points, cells = create_mesh(divisions)  # points: float64, cells: int32
     if world_radius != 1:
         points *= world_radius
 
     # print("Points:")
-    # print(points)
+    # print(points.dtype)
     # print("Cells:")
-    # print(cells)
+    # print(cells.dtype)
 
     # If I need to output several meshes for examination
     # for i in range(2, 26, 2):
@@ -236,20 +251,27 @@ def main():
 # =============================================
 
     # ToDo: Test compact_nodes and balanced_tree args for build/query performance tradeoffs
+    # NOTE: I've tested as high as k=7500 and the KD Tree took 264 seconds to build. Amazingly the query for the LL array only took half a second.
+    # The Tree takes 114 seconds to build for k=5000, and 26 seconds for k=2500
     if args.png or snapshot_erosion or snapshot_climate:
         time_start = time.perf_counter()
         # Array of 3D coordinates on the sphere for each pixel that will be in the exported image.
-        ll = make_ll_arr(img_width, img_height)
+        ll = make_ll_arr(img_width, img_height, world_radius)
+        # NOTE: What if we did the reverse of this? Instead of converting 2D lat/lon of the pixels into 3D coordinates and then doing a KD Tree query in 3 dimensions,
+        # what if we took the 3D coordinates of every mesh vertex and converted them into 2D coordinates and then did the nearest neighbor search in 2D?
+        # Would a 2D search be faster? Would the edges of the 'image grid' be problematic because they wrap around to the other side? Would the poles have trouble finding 3 correct neighbors?
         ll_end = time.perf_counter()
         build_KDTree(points)
         kdt_end = time.perf_counter()
         # For each pixel's 3D coordinates, this is the 3 nearest vertices, and the distances to said vertices.
         # The name kinda sucks though. Maybe we could rename it img_pixel_neighbors.
+        print("Building query...")
         cfg.IMG_QUERY_DATA = cfg.KDT.query(ll, k=3, workers=-1)
         query_end = time.perf_counter()
 
         ll = None
-        cfg.KDT = None
+        if not test_latlon:
+            cfg.KDT = None
 
         print(f"  LL built in       {ll_end - time_start :.5f} sec")
         print(f"  KD Tree built in  {kdt_end - ll_end :.5f} sec")
@@ -261,9 +283,8 @@ def main():
     # Initialize the permutation arrays to be used in noise generation
     perm, pgi = osi.init(world_seed)  # Very fast. 0.02 secs or better
 
-    # Ocean altitude is a *relative* percent (expressed as a decimal) of the max altitude
-    # e.g. 0.4 would set the ocean to 40% of the height from the min to max altitude.
-    ocean_percent = 0.55
+    # Ocean altitude is a *relative* percent of the range from min to max altitude.
+    ocean_percent = 55.0
     n_init_rough = 1.5     # Initial roughness of first octave
     n_init_strength = 0.4  # Initial strength of first octave
     n_roughness = 2.5      # Multiply roughness by this much per octave
@@ -278,13 +299,13 @@ def main():
     print("Sampling noise...")
 
     # ToDo: Consider pulling arg values from cfg.py, options.json, seed json file, or as kwargs because this line is a long boi now.
-    height = sample_octaves(points, None, perm, pgi, n_octaves, n_init_rough, n_init_strength, n_roughness, n_persistence, ocean_percent, world_radius)
+    height = sample_octaves(points, None, perm, pgi, n_octaves, n_init_rough, n_init_strength, n_roughness, n_persistence, world_radius)
 
-    height = rescale(height, -0.05, 0.15)
-#    height = rescale(height, -4000, 8850)
+#    height = rescale(height, -0.05, 0.15)
+    height = rescale(height, -4000, 8850)
 #    height = rescale(height, -4000, 0, 0, mode='lower')
 #    height = rescale(height, 0, 8850, 0, mode='upper')
-
+#    height = rescale(height, -1, 1)
 
     # ToDo: Multiply the rescaled height times the world radius?
     minval = np.amin(height)
@@ -292,18 +313,30 @@ def main():
     print("  Rescaled min:", minval)
     print("  Rescaled max:", maxval)
 
-    # https://math.stackexchange.com/questions/2110160/find-percentage-value-between-2-numbers
-    # ocean_level = minval + ((maxval - minval) * 50 / 100)  # If I want to input percentage as an integer between 0 and 100 we need the divide by 100 step (50 would be 50%; replace that number with a variable)
-    ocean_level = minval + ((maxval - minval) * ocean_percent)  # Or this way to just input a decimal percent. NOTE: Due to the way np.clip works (hack below), values less than 0% or greater than 100% have no effect.
+    ocean_level = find_percent_val(minval, maxval, ocean_percent)  # NOTE: Due to the way np.clip works (hack below), values less than 0% or greater than 100% have no effect.
     print("  Ocean Level:", ocean_level)
+
+    ocean = make_mask(height, ocean_level)
+
+    if args.png:
+        export_list["ocean"] = [ocean, 'gray']
+
+    # Bring ocean floors up with a power < 1
+    height = power_rescale(height, mask=ocean, mode=1 , power=0.5)
+
+    # Bring land down with a power > 1
+    height = power_rescale(height, mask=ocean, mode=0 , power=2.0)
+
 
     # height *= 10
     # height += 6378100
     # height += 400000
     # height += world_radius - 1
 
-    height = np.clip(height, ocean_level, maxval)  # Hack for showing an ocean level in pyvista.  It might be time to try using a 2nd sphere mesh just for water, and use masks with the scalars or something so underwater areas don't bungle the height colormap.
+#    height = np.clip(height, ocean_level, maxval)  # Hack for showing an ocean level in pyvista.  It might be time to try using a 2nd sphere mesh just for water, and use masks with the scalars or something so underwater areas don't bungle the height colormap.
     # Also this clipping should probably be one of the last steps before visualizing.
+    # height = np.clip(height, minval, ocean_level)
+
 
     # height -= ocean_level  # Move the ocean level to 0; need to rescale the upper and lower halves again to regain proper min and max altitudes.
 
@@ -326,7 +359,13 @@ def main():
     # height *= world_radius  # Keeps the scale relative. NOTE: But don't multiply here, because that messes up the display of the scalar bar in pyvista. Instead, do this multiplication down inside the visualize function.
 
     if args.png and not do_erode:
-        export_list["height"] = height
+        #potato = rescale(height, -4000, 8850) + 32768
+        # export_list["height"] = [potato.astype('uint16'), 'gray']
+        # export_list["height"] = [(rescale(height, -4000, 8850) + 32768).astype('uint16'), 'gray']
+        export_list["height_absolute"] = [ (rescale(height, -4000, 8850) + (32768 - find_percent_val(-4000, 8850, ocean_percent))).astype('uint16') , 'gray']
+        print("THE THING MIN:", np.min(export_list["height_absolute"][0]))
+        print("THE THING MAX:", np.max(export_list["height_absolute"][0]))
+        export_list["height_relative"] = [ (rescale(height, 0, 65535)).astype('uint16') , 'gray']
 
 # Erode!
 # ToDo: Which came first, the erosion or the climate? Maybe do climate first, as the initial precipitation determines erosion rates.
@@ -354,7 +393,7 @@ def main():
         # print(newheight)
 
         if args.png:
-            export_list["height"] = height
+            export_list["height"] = [height, 'gray']
 
 # Climate Stuff
 # =============================================
@@ -382,7 +421,7 @@ def main():
         print(f"Assign surface temps runtime: {temp_end-temp_start:.5f} sec")
 
         if args.png:
-            export_list["surface_temp"] = surface_temps
+            export_list["surface_temp"] = [surface_temps, 'gray']
 
         # ====================
         # NOTE: Attempt 1 at spherical solar flux (hour angle stuff); big fail.
@@ -397,7 +436,7 @@ def main():
             temp_end = time.perf_counter()
             print(f"Runtime: {temp_end-temp_start:.5f} sec")
             if args.png:
-                export_list["instant_insol"] = insol_2
+                export_list["instant_insol"] = [insol_2, 'gray']
 
         # NOTE: Version '2.5'
         print("Calculating daily solar insolation (slice method)...")
@@ -408,7 +447,7 @@ def main():
 
         # daily_insolation *= (tsi/360)  # Compared to the NASA data for 1980 this is off by like 20 Watts or so, but the cosine angle is basically perfect.
         if args.png:
-            export_list["daily_insolation"] = daily_insolation
+            export_list["daily_insolation"] = [daily_insolation, 'gray']
 
         do_annual = False
         if do_annual:
@@ -419,7 +458,7 @@ def main():
             print(f"Runtime: {temp_end-temp_start:.5f} sec")
 
             if args.png:
-                export_list["annual_insolation"] = annual_insolation
+                export_list["annual_insolation"] = [annual_insolation, 'gray']
 
         # calc_equilibrium_temp()
 
@@ -430,6 +469,8 @@ def main():
         llpoint = latlon2xyz(20, 15, world_radius)
         if cfg.KDT is None:
             build_KDTree(points)
+
+        # approx_size(getsize(cfg.KDT), "KD Tree", "BINARY")
 
         print("Querying KD Tree for neighbors...")
         query_start = time.perf_counter()
@@ -444,17 +485,28 @@ def main():
 # Save the world map to a texture file
 # =============================================
     if args.png:
-        print("Saving world map image...")
+        print("Saving world map image(s)...")
 
-        # ToDo: 16-bit images (rescale 0-65535 and save support in the save_image util function)
+        # ToDo: 16-bit images (rescale 0-65535 with 32768 as sea level--if heights are absolute already, just add 32768--and save support in the save_image util function)
         # (For RGB this may require abandoning the pillow library but for grayscale pillow should still work)
-        for key, array in export_list.items():
-            if array.dtype in ('int8', 'uint8', 'bool_'):  # uint8 is technically safe for rescale between 0-255
-                export_list[key] = rescale(array.astype(np.float64), 0, 255)
-            else:
-                export_list[key] = rescale(array, 0, 255)
+        # Idea: We could get half-meter precision if we have an export mode where we export bathymetry separately from land elevations;
+        # multiply the input array * 2 before rounding to integers, I think. Elevation starts at 0 and goes up, bathymetry starts at 65535 and goes down.
+
+        # I'm kind of thinking that maybe the CFG module should have its own dict that records what each array's mode is.. like, get the key from export_list, then like cfg.img_modes[key] gets the dtype?
+        # But how do we determine the appropriate range to rescale? Or rather are there times when rescaling to the dtype is not wanted? If the dtype is uint16 then presumably it's a heightmap, but what if I want temperature in 16-bit?
+        # Temperature ALSO has positive and negative values, though, so maybe insolation or precipitation would be a better example, because those can't have negative values.
+        # Maybe a simple dummy class for each array like how in the Context Select add-on for Blender the ObjectMode class works. So for Nixis it'd be like cfg.height.mode (RGB, gray, etc), cfg.height.dtype, cfg.height.minmax or .rescale or something?
+        # Would python allow it to be crammed into one class?  Like cfg.img.height.dtype (wow that's unfortunately long)
+        # It might just be best to restructure the export_list and the functions that handle it (aka build_image_data) to be a dict with a list inside like {"height":[height_array, mode, dtype]}
+        # for key, container in export_list.items():  container[0] is always the array, container[1] is always the mode, container[2] is always the dtype, and so on.
+        # Or instead of calling the parameter "mode", call it "channels" because that's basically what it amounts to; the number of channels the image will have. 1 for grayscale, 3 or 4 for RGB or RGBA, and the dtype controls bit depth.
+        # OR, the shit could just be properly rescaled and stuff at the end of the relevant section in nixis.py
+        # i.e. at the part where I go if args.png: export_list["height"] = height  instead becomes, like, export_list["height"] = height.astype('uint16) + 32768  or something along those lines.  Then we don't have to guess later what to do.
+        # I THINK that would preserve the original height array to be used in erosion and pyvista, and would create a copy in the export_list.  This can be tested by checking the python id for the objects, or just printing the numpy min/max for each.
 
         pixel_data = build_image_data(export_list)
+        export_list = None
+
         save_start = time.perf_counter()
         save_image(pixel_data, cfg.SAVE_DIR, world_name)
         save_end = time.perf_counter()
@@ -471,8 +523,16 @@ def main():
     print(f"Script runtime: {runtime_end - runtime_start:.3f} seconds" + "\n")
 
     print("Preparing visualization...")
-    # visualize(points, cells, height, search_point=llpoint, neighbors=llneighbors, radius=world_radius, tilt=current_tilt)
-#    visualize(points * (np.reshape(height, (len(points), 1)) + 1), cells, height, tilt=current_tilt)  # NOTE: Adding +1 to height means values only grow outward if range is 0-1. But for absolute meter ranges it merely throws the values off by 1.
+    # The array that we want to use for the scalar bar.
+    scalars = {"s-mode":"height", "scalars":height}
+    # Possible s-modes to control the gradient used by the scalar bar:
+        # height (solid color for ocean, colors for land)
+        # bathy (colors for ocean height, solid color for land)
+        # ocean (some other ocean metric colors, solid color for land)
+        # topo (gradient has a hard break at the shore from ocean to land)
+        # surface temperature or surface insolation (which is uniform for the full surface from min to max without weird breaks at the land/ocean border)
+    # visualize(points, cells, height, scalars, search_point=llpoint, neighbors=llneighbors, radius=world_radius, tilt=current_tilt)
+#    visualize(points * (np.reshape(height, (len(points), 1)) + 1), cells, height, scalars, tilt=current_tilt)  # NOTE: Adding +1 to height means values only grow outward if range is 0-1. But for absolute meter ranges it merely throws the values off by 1.
 
     # NOTE: Adding +1 to height means values only grow outward if range is 0-1. But for absolute meter ranges it merely throws the values off by 1.
     # NOTE: Figure out the proper way to multiply points times the absolute heights to maintain the correct radius.
@@ -484,15 +544,16 @@ def main():
 
     # Reshaping the heights to match the shape of the vertices array so we can multiply the verticies * the heights.
     # points *= np.reshape(height/world_radius + 1, (len(points), 1))  # Rather, do it this way instead. NOTE: This should really be done inside the visualize function.
+    # https://gamedev.net/forums/topic/316602-increase-magnitude-of-a-vector-by-a-value/3029750/
     points *= np.reshape((height-ocean_level)/world_radius + 1, (len(points), 1))  # Rather, do it this way instead. NOTE: This should really be done inside the visualize function.
 
     # print("After points")
     # print(points)
 
     if test_latlon:
-        visualize(points, cells, height, search_point=llpoint, neighbors=llneighbors, radius=world_radius, tilt=current_tilt)
+        visualize(points, cells, height, scalars, zero_level=ocean_level, search_point=llpoint, neighbors=llneighbors, radius=world_radius, tilt=current_tilt)
     else:
-        visualize(points, cells, height, radius=world_radius, tilt=current_tilt)
+        visualize(points, cells, height, scalars,  zero_level=ocean_level, radius=world_radius, tilt=current_tilt)
 
     # ToDo: PyVista puts execution 'on hold' while it visualizes. After the user closes it execution resumes.
     # Consider asking the user right here if they want to save out the result as a png/mesh/point cloud.
@@ -506,7 +567,7 @@ def main():
     #     os.remove(temp_path)
 
 
-def visualize(verts, tris, heights=None, search_point=None, neighbors=None, radius=1.0, tilt=0.0):
+def visualize(verts, tris, heights=None, scalars=None, zero_level=0.0, search_point=None, neighbors=None, radius=1.0, tilt=0.0):
     """Visualize the output."""
     # pyvista expects that faces have a leading number telling it how many
     # vertices a face has, e.g. [3, 0, 11, 5] where 3 means triangle.
@@ -519,13 +580,13 @@ def visualize(verts, tris, heights=None, search_point=None, neighbors=None, radi
     time_end = time.perf_counter()
     print(f"Time to reshape triangle array: {time_end - time_start :.5f} sec")
 
-    # pyvista mesh
+    # Create pyvista mesh from our icosphere
     mesh = pv.PolyData(verts, new_tris)
+    # Separate mesh for ocean water
+    ocean_shell = pv.ParametricEllipsoid(radius, radius, radius, u_res=300, v_res=300)
 
     if search_point is not None and neighbors is not None:
         # Is it strictly necessary that these be np.arrays?
-#        neighbor_dots = pv.PolyData(np.array([verts[neighbors[0]], verts[neighbors[1]], verts[neighbors[2]]]))
-#        neighbor_dots = pv.PolyData(neighbors)
         neighbor_dots = pv.PolyData(np.array([verts[v] for v in neighbors]))
         search_dot = pv.PolyData(np.array(search_point))
     x_axisline = pv.Line([-1.5*radius,0,0],[1.5*radius,0,0])
@@ -542,21 +603,47 @@ def visualize(verts, tris, heights=None, search_point=None, neighbors=None, radi
     ax, ay, az = latlon2xyz(90-tilt, 180, radius)
     s_axisline = pv.Line([0,0,0], [ax * 1.5, ay * 1.5, az * 1.5])
 
-
     # Clip the heights again so we can show water separately from land gradient
     # by cleverly using the below_color for anything below what we clip here.
     minval = np.amin(heights)
     maxval = np.amax(heights)
     # heights = np.clip(heights, minval*1.001, maxval)
 
+    # ===============
+    # Define the colors we want to use
+    blue = np.array([12/256, 238/256, 246/256, 1])
+    black = np.array([11/256, 11/256, 11/256, 1])
+    grey = np.array([189/256, 189/256, 189/256, 1])
+    yellow = np.array([255/256, 247/256, 0/256, 1])
+    red = np.array([1, 0, 0, 1])
+
+    # Derive percentage of transition from ocean to land from zero level
+    cmap_zl1 = ( (zero_level - minval) / (maxval - minval) ) - 0.001
+    cmap_zl0 = cmap_zl1 - 0.001
+    print("cmap transition lower:", cmap_zl0)
+    print("cmap transition upper:", cmap_zl1)
+
+    custom_cmap = LinearSegmentedColormap.from_list('ocean_and_topo', [(0, [0.1,0.2,0.6]), (cmap_zl0, [0.8,0.8,0.65]), (cmap_zl1, [0.3,0.4,0.0]), (1, [1,1,1])])
+    # ===============
+
     # https://matplotlib.org/cmocean/
     # https://docs.pyvista.org/examples/02-plot/cmap.html
     # https://colorcet.holoviz.org/
-    sargs = dict(below_label="Ocean")
+    # sargs = dict(below_label="Ocean", n_labels=0, label_font_size=15)
+    sargs = dict(n_labels=0, label_font_size=12, position_y=0.07)
+    # anno = {minval:f"{minval:.2}", zero_level:"0.00", maxval:f"{maxval:.2}"}
+    anno = {minval:f"{minval:.2}", find_percent_val(minval, maxval, cmap_zl0*100):"0.00", maxval:f"{maxval:.2}"}
+
+    # ToDo: Add title to the scalar bar sargs and dynamically change it based on what is being visualized (e.g. Elevation, Surface Temperature, etc.)
+    # title="whatever" (remove the quotes and make 'whatever' into a variable, like the s-mode or whatever. like title=scalars["s-mode"])
+    # "Current"? ".items()"? https://stackoverflow.com/questions/3545331/how-can-i-get-dictionary-key-as-variable-directly-in-python-not-by-searching-fr
+    # https://stackoverflow.com/questions/16819222/how-to-return-dictionary-keys-as-a-list-in-python
 
     pl = pv.Plotter()
-    pl.add_mesh(mesh, show_edges=False, smooth_shading=True, color="white", below_color="blue", scalars=heights, cmap="thermal", culling = "back", scalar_bar_args=sargs)
-    # pl.add_scalar_bar(below_label="Ocean")
+    # pl.add_mesh(mesh, show_edges=False, smooth_shading=True, color="white", below_color="blue", culling="back", scalars=scalars["scalars"], cmap=custom_cmap, scalar_bar_args=sargs, annotations=anno)
+    pl.add_mesh(mesh, show_edges=False, smooth_shading=True, color="white", culling="back", scalars=scalars["scalars"], cmap=custom_cmap, scalar_bar_args=sargs, annotations=anno)
+    pl.add_mesh(ocean_shell, show_edges=False, smooth_shading=True, color="blue", opacity=0.15)
+
     if search_point is not None and neighbors is not None:
         pl.add_mesh(neighbor_dots, point_size=15.0, color = "magenta")
         pl.add_mesh(search_dot, point_size=15.0, color = "purple")
