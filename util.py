@@ -16,7 +16,7 @@ import cfg
 
 def create_mesh(divisions):
     """Make a mesh with meshzoo"""
-    # Note: meshzoo creates its icosahedrons aligned to the world axis.
+    # NOTE: meshzoo creates its icosahedrons aligned to the world axis.
     # Maya's icosahedron platonic is rotated -58.282 on Y for some reason.
     # Unsurprisingly, the vertex order is also different.
     # meshzoo's winding looks counter-clockwise?
@@ -29,21 +29,21 @@ def create_mesh(divisions):
     #   Edges is k^2 * 30
     #   Tris is k^2 * 20
     # Obtain count of components starting from verts:
-    #   Edges is (verts-2) * 3
-    #   Tris is (verts*2) - 4
+    #   Edges is (verts - 2) * 3
+    #   Tris is (verts * 2) - 4
     # Obtain count of components starting from edges:
     #   Verts is (edges / 3) + 2
     #   Tris is edges / 1.5
     # Obtain count of components starting from tris:
-    #   Verts is (tris+4) / 2
+    #   Verts is (tris + 4) / 2
     #   Edges is tris * 1.5
     print("Generating the mesh...")
     print(f"k is {divisions}")
     time_start = time.perf_counter()
     points, cells = mz.icosa_sphere(divisions)
     time_end = time.perf_counter()
-    print(f"Number of vertices: {points.shape[0]:,}")
-    print(f"Number of triangles: {cells.shape[0]:,}")
+    print(f"Number of vertices: {points.shape[0]:,}")  # points: np.float64
+    print(f"Number of triangles: {cells.shape[0]:,}")  # cells: np.int32
     print(f"Mesh generated in {time_end - time_start :.5f} sec")
     return points, cells
 
@@ -80,12 +80,12 @@ def latlon2xyz(lat, lon, r=1):
 
 @njit(cache=True)
 def kelvin_to_c(k):
-    """Convert temperatures from Kelvin to Celsius."""
+    """Convert temperature from Kelvin to Celsius."""
     return k - 273.15
 
 @njit(cache=True)
 def c_to_kelvin(c):
-    """Convert temperatures from Celsius to Kelvin."""
+    """Convert temperature from Celsius to Kelvin."""
     return c + 273.15
 
 # https://stats.stackexchange.com/questions/351696/normalize-an-array-of-numbers-to-specific-range
@@ -93,10 +93,11 @@ def c_to_kelvin(c):
 # ToDo: Need to take a closer look at the shape of the data that is acceptable for this function
 # because I've had some weird issues with numba not wanting to compile the return values
 # if the array wasn't flattened before being set to rescale()
-# ToDo: Prevent accidental div by 0 errors by checking to see if x_range is 0 and doing a sys.exit if it is.
-# ToDo: This could possibly be faster with prange.
+# ToDo: Prevent accidental div by 0 errors by checking to see if x_range is 0.
+# ToDo: Also NaN checks related to above.
 # ToDo: If "mid" is supplied, then rescale the upper and lower values separately. (rescale with two ranges, lower to mid, and mid to upper)
 # ToDo: Absolute value scaling support. E.G. If the supplied array is exactly 0 to 1, then each 0.00113019 would scale to approximately 10 meters if our absolute max is Mt Everest at 8848 meters.
+# Possible ToDo: A parameter called "inplace" that is either true or false (default false) that modifies the array in place when true.
 @njit(cache=True, parallel=True, nogil=True)
 def rescale(x, lower, upper, mid=None, mode=None, u_min=None, u_max=None):
     """Re-scale (normalize) an array to a given lower and upper bound.
@@ -109,7 +110,8 @@ def rescale(x, lower, upper, mid=None, mode=None, u_min=None, u_max=None):
     u_min -- Optionally specify an absolute value for x min.
     u_max -- Optionally specify an absolute value for x max.
     """
-    new_array = np.copy(x)
+    new_array = np.copy(x)  # NOTE: Rescale doesn't work safely on certain numpy dtypes, like a simple black and white mask that has a dtype of bool_ or something simple like int8 because their precision is too small.
+    # new_array = x.astype(np.float64)
 
     x_min = np.min(x)
     x_max = np.max(x)
@@ -120,7 +122,7 @@ def rescale(x, lower, upper, mid=None, mode=None, u_min=None, u_max=None):
         x_max = u_max
 
     if mode is None:
-        if mid is None:
+        if mid is None:  # Standard rescale. Works fine.
             x_range = x_max - x_min
             new_range = upper - lower
 
@@ -128,9 +130,7 @@ def rescale(x, lower, upper, mid=None, mode=None, u_min=None, u_max=None):
                 new_array[a] = ((x[a] - x_min) / x_range) * new_range + lower
             return new_array
 
-        else:  # This is probably wrong.  In fact, giving it a second thought, can this branch even produce a different result than the first branch?
-#            # mid = x_min + (mid * (x_max + np.abs(x_min)))  # I have no idea if this is right
-#            mid = mid * (x_max + abs(x_min))  # Numba hates this for some reason, and it fails the whole compile; maybe just mid *= (x_max + abs(x_min))
+        else:  # Rescale both halves separately. Seems to work fine.
             x_lower_range = mid - x_min
             new_lower_range = mid - lower
             x_upper_range = x_max - mid
@@ -139,14 +139,16 @@ def rescale(x, lower, upper, mid=None, mode=None, u_min=None, u_max=None):
                 if x[a] <= mid:
                     new_array[a] = ((x[a] - x_min) / x_lower_range) * new_lower_range + lower
                 else:
-                    new_array[a] = ((x[a] - mid) / x_upper_range) * new_upper_range + mid  # Not sure if substituting the mid value for the 'x_min' and 'lower' will produce proper results, but we'll see.
+                    new_array[a] = ((x[a] - mid) / x_upper_range) * new_upper_range + mid
             return new_array
 
     if mode is not None:
         if mid is None:
             print("ERROR: Must supply a middle value to use rescale modes.")
+            print("Continuing with unmodified data.")
             # ToDo: Maybe raise an exception instead (actually I don't know if numba can handle that; the documentation says it can't do try/except, but it can do raise or assert)
             # sys.exit(0)
+            return x
         elif mode == 'lower':
             x_range = mid - x_min
             new_range = mid - lower  # The upper value for rescaling the lower values becomes 0  NOTE: Hold up, my sample_noise4 is returning values from 0 to 1, not -1 to +1 because of the way I add 1 to values.
@@ -160,8 +162,87 @@ def rescale(x, lower, upper, mid=None, mode=None, u_min=None, u_max=None):
             new_range = upper - mid
             for a in prange(len(x)):
                 if x[a] >= mid:
-                    new_array[a] = ((x[a] - mid) / x_range) * new_range + mid  # Not sure if substituting the mid value for the 'x_min' and 'lower' will produce proper results, but we'll see.
+                    new_array[a] = ((x[a] - mid) / x_range) * new_range + mid
             return new_array
+
+# Possible ToDo: A parameter called "inplace" that is either true or false (default false) that modifies the array in place when true.
+@njit(cache=True, parallel=True, nogil=True)
+def power_rescale(x, mask=None, mode=None, power=1.0):
+    """Rescale values using a power function.
+    x -- The array to modify.
+    mask -- An array of True/False that matches the length of x.
+    mode -- 0 means rescale items in x that are False in the mask,
+            1 means rescale items in x that are True in the mask.
+    power -- The power to apply to items in x."""
+    new_array = np.copy(x)
+
+    temp_upper = 1.0
+    temp_lower = 0.0
+
+    x_min = np.min(x)
+    x_max = np.max(x)
+
+    mask_lower = x_max
+    mask_upper = x_min
+
+    temp_range = temp_upper - temp_lower
+
+    # ToDo: We can possibly consolidate the structure in here to shove everything under mode==1 or mode==0 to reduce the number of if/elif branches.
+    # There might also be some validity to the idea of building a separate list of vertices to modify and only operating on those instead of doing
+    # repeated comparisons of if mode==N and mask[a] for every vertex on the mesh.
+    # Also if both rescale and power_rescale will continue to exist as separate functions then there's no reason that power_rescale should do all the math itself for the temporary conversion to 0-1 range and back; just call rescale.
+    if mode==1:
+        for a in range(len(x)):  # Probably can't safely do prange here
+            if mask[a] and x[a] < mask_lower:
+                mask_lower = x[a]
+            elif mask[a] and x[a] > mask_upper:
+                mask_upper = x[a]
+    elif mode==0:
+        for a in range(len(x)):  # Probably can't safely do prange here
+            if not mask[a] and x[a] < mask_lower:
+                mask_lower = x[a]
+            elif not mask[a] and x[a] > mask_upper:
+                mask_upper = x[a]
+
+    print("x min:", x_min)
+    print("x max:", x_max)
+    print("mask min:", mask_lower)
+    print("mask max:", mask_upper)
+
+    mask_range = mask_upper - mask_lower
+
+    # new_array[a] = ((x[a] - x_min) / x_range) * new_range + lower
+    for a in prange(len(x)):
+        if mode==1 and mask[a]:
+            new_array[a] = ((x[a] - mask_lower) / mask_range) * temp_range + temp_lower
+        elif mode==0 and not mask[a]:
+            new_array[a] = ((x[a] - mask_lower) / mask_range) * temp_range + temp_lower
+
+    for a in prange(len(x)):
+        if mode==1 and mask[a]:
+            new_array[a] **= power
+        elif mode==0 and not mask[a]:
+            new_array[a] **= power
+
+    # Attemping to use a fudge factor messes up the range when converting back to the original range?
+    # Something to investigate later. But I did accidentally make something that looks like continental shelves.
+    # fudge = 1.2
+    # temp_lower *= fudge
+    # temp_upper *= fudge
+    # temp_range = temp_upper - temp_lower
+    # for a in prange(len(x)):
+    #     if mode==1 and mask[a]:
+    #         new_array[a] = (new_array[a] * fudge) ** power
+    #     elif mode==0 and not mask[a]:
+    #         new_array[a] = (new_array[a] * fudge) ** power
+
+    for a in prange(len(x)):
+        if mode==1 and mask[a]:
+            new_array[a] = ((new_array[a] - temp_lower) / temp_range) * mask_range + mask_lower
+        elif mode==0 and not mask[a]:
+            new_array[a] = ((new_array[a] - temp_lower) / temp_range) * mask_range + mask_lower
+
+    return new_array
 
 
 def make_ranges(arr_len, threads):
@@ -198,7 +279,7 @@ def build_KDTree(points, lf=10):
 # =============================================
 
 @njit(cache=True, parallel=True, nogil=True)
-def make_ll_arr(width, height):
+def make_ll_arr(width, height, radius):
     """Find XYZ coordinates for each pixel's latitude and longitude"""
     # Each pixel that will compose the exported world map has its own lat/lon.
     map_array = np.ones((height, width, 3), dtype=np.float64)
@@ -213,17 +294,22 @@ def make_ll_arr(width, height):
         # Loop through each Longitude per latitude.
         for w in prange(width):
             # Take the pixel's lat/lon and get its 3D coordinates
-            d = latlon2xyz(max(lat - (h * latpercent), -90), max(lon + (w * lonpercent), -180))
+            d = latlon2xyz(max(lat - (h * latpercent), -90), max(lon + (w * lonpercent), -180), radius)
             map_array[h][w] = d
     return map_array
 
 # NOTE: Keep an eye out for weird numba compile failures in here.
+# ToDo: Want to take a look at refactoring this later without using so many np.array() calls, and possibly without using numpy at all as it may have too much overhead for such small arrays (array size is like 3 items for neighbors)
 @njit(cache=True, parallel=True, nogil=True)
-def make_m_array(width, height, dists, nbrs, colors):
-    """Sample vertices and build a map for export."""
+def make_rgb_array(width, height, dists, nbrs, colors):
+    """Sample vertices and build an RGB map for export."""
+    # Had to make RGB and Gray as separate functions because njit barfs
+    # if the return shape is different for an RGB/Gray array and because
+    # Pillow doesn't understand MxNx1 shaped arrays.
     # debug_color = np.array([255,0,255], dtype=np.int32)
-    map_array = np.full((height, width, 3), 255, dtype=np.int32)
+    map_array = np.full((height, width, 3), 0, dtype=np.int32)
     # print(map_array)
+    orig_dtype = colors.dtype
 
     for h in prange(height):
         for w in prange(width):
@@ -239,11 +325,38 @@ def make_m_array(width, height, dists, nbrs, colors):
 
             # ToDo: Support for setting channel values individually instead of all the same. Possibly as sub-functions depending on performance and flow/structure.
             map_array[h][w] = [value, value, value]
-    return map_array
+
+    return map_array.astype(orig_dtype)
+
+# ToDo: Want to take a look at refactoring this later without using so many np.array() calls, and possibly without using numpy at all as it may have too much overhead for such small arrays (array size is like 3 items for neighbors)
+@njit(cache=True, parallel=True, nogil=True)
+def make_gray_array(width, height, dists, nbrs, colors):
+    """Sample vertices and build a grayscale map for export."""
+    # Had to make RGB and Gray as separate functions because njit barfs
+    # if the return shape is different for an RGB/Gray array and because
+    # Pillow doesn't understand MxNx1 shaped arrays.
+    map_array = np.full((height, width), 0, dtype=np.int32)
+    # print(map_array)
+    orig_dtype = colors.dtype
+
+    for h in prange(height):
+        for w in prange(width):
+            # ToDo: For certain maps like a B&W land/water mask, or the tectonic plate map I might actually want hard borders without the anti-aliased smoothing of averages along the edges.
+            # For this perhaps I could have the function take an argument like 'AA' for anti-aliashed.  If True, use the weighted distance logic. Else use a different logic. Maybe even split the logics out to different functions.
+            # https://math.stackexchange.com/questions/3817854/formula-for-inverse-weighted-average-smaller-value-gets-higher-weight
+            sd = np.sum(dists[h][w])  # Sum of distances
+            # Add a tiny amount to each i to (hopefully) prevent NaN and div by 0 errors
+            ws = np.array([1 / ((i+0.00001) / sd) for i in dists[h][w]], dtype=np.float64)  # weights
+            t = np.sum(ws)  # Total sum of weights
+            iw = np.array([i/t for i in ws], dtype=np.float64)  # Inverted weights
+            value = int(np.sum(np.array([colors[nbrs[h][w][i]]*iw[i] for i in range(len(iw))])))  # ToDo: If I add support for floating point image formats like EXR or HDR then this can't be an int.
+
+            map_array[h][w] = value
+
+    return map_array.astype(orig_dtype)
 
 def build_image_data(colors=None):  # Could rename this to like make_image_data (my naming conventions are not unitform, some functions are "make_", some are "build_", and some are "create_"; make_ would be shortest)
     """Use KD-Tree results to sample vertices and build a map for export.
-    imgquery -- Array/list that holds the KD Tree distance and neighbor arrays.
     colors -- A dict of numpy arrays. Keys are names, arrays hold the data.
     """
     # ToDo: In the future I might have a vert array with vertex colors that
@@ -254,25 +367,47 @@ def build_image_data(colors=None):  # Could rename this to like make_image_data 
     # Possible improvements include averaging up to 6 neighbors if lat/lon is
     # directly on a vertex. (if dist to 1 vert is <= some tiny number)
 
-    options = load_settings("options.json")
+    options = load_settings("options.json")  # ToDo: Probably grab options from CFG instead of from disk.
     width = options["img_width"]
     height = options["img_height"]
 
     print("Sampling verts for texture...")
 
-    dists = cfg.IMG_QUERY_DATA[0]
-    nbrs = cfg.IMG_QUERY_DATA[1]
+    dists = cfg.IMG_QUERY_DATA[0]  # numpy float64
+    nbrs = cfg.IMG_QUERY_DATA[1]   # numpy int64
     result = {}
 
     if not isinstance(colors, dict):
         print("ERROR: Must pass a dict when saving out texture maps.")  # ToDo: Better error handling.
 
-    for key, array in colors.items():
+    for key, container in colors.items():
+        array = container[0]
+        mode = container[1]
+        if array.dtype in ('int8', 'uint8', 'bool_'):  # uint8 is technically safe for rescale between 0-255
+            colors[key] = [rescale(array.astype(np.float64), 0, 255), mode]  # ToDo: Will pillow choke if it gets passed a float64 array?
+        elif array.dtype in ('uint16', 'uint32'):  # ToDo: Uh, why did I exempt uint32?
+            pass
+        else:  # Fallback for unexpected dtypes
+            colors[key] = [rescale(array, 0, 255), mode]  # ToDo: Will pillow be okay?  We're not doing an .astype to change the dtype here.
+
+    for key, container in colors.items():
+        array = container[0]
+        mode = container[1]
+
         time_start = time.perf_counter()
-        pixels = make_m_array(width, height, dists, nbrs, array)
+        if mode in ('rgb', 'RGB'):
+            pixels = make_rgb_array(width, height, dists, nbrs, array)
+        elif mode in ('gray', 'GRAY', 'grey', 'GREY'):
+            pixels = make_gray_array(width, height, dists, nbrs, array)
         time_end = time.perf_counter()
+
+        colors[key] = None
+
         print(f"  {key} pixels built in   {time_end - time_start :.5f} sec")
-        result[key] = pixels
+        if array.dtype in ('float16', 'int32', 'uint32', 'float32', 'int64', 'uint64', 'float64'):
+            result[key] = pixels.astype('uint8')
+        else:
+            result[key] = pixels.astype(array.dtype)
 
     return result
 
@@ -291,13 +426,15 @@ def save_image(data, path, name):
     data -- A dict. The key will be appended to the end of the file name.
     path -- The path to the folder where the file will be saved.
     name -- File name without extension. Final output will be name_key.ext"""
-    # Retrieve file extension from Nixis options.json
+    # Retrieve file extension from Nixis options.json  # ToDo: Consider using the cfg module instead.
     options = load_settings("options.json")
     fmt = options["img_format"]
 
     for key, array in data.items():
         out_path = os.path.join(path, f"{name}_{key}.{fmt}")
-        img = Image.fromarray(array.astype('uint8'))
+        # img = Image.fromarray(array.astype('uint8'))
+        # img = Image.fromarray(array[:,:,0])  # If an array is RGB (if each pixel has 3 values) this will slice it to only have 1 value, i.e. grayscale, which pillow CAN do.  (Will work for uint16 and uint8 grayscale)
+        img = Image.fromarray(array)
         img.save(out_path)
 
 # ToDo: Validate that we can import 16-bit data and keep it that way instead of converting to 8-bit
@@ -398,6 +535,19 @@ def export_planet(data, path, name):
     """Export the planet as a database file."""
     print("Not implemented yet.")
 
+# https://math.stackexchange.com/questions/2110160/find-percentage-value-between-2-numbers
+def find_percent_val(minval, maxval, percent):
+    """Find the percentage value between a min and max number.
+    minval -- The low number of the range.
+    maxval -- The high number of the range.
+    percent -- A number from 0.0 to 100.0 (inclusive)."""
+    if not 0.0 < percent < 100.0:
+        print("\n" + "    ERROR: Percent must be between 0 and 100 (inclusive).")
+        print("    Defaulting to 50 percent." + "\n")
+        percent = 50.0
+
+    return minval + ((maxval - minval) * percent / 100.0)
+
 # https://stackoverflow.com/questions/7632963/numpy-find-first-index-of-value-fast/29799815#29799815
 @njit(cache=True)
 def find_first(item, vec):
@@ -482,3 +632,83 @@ def sort_adjacency(adj):
             pv = visited[i]
         visited[5] = nv
         adj[idx] = visited
+
+
+# Based on https://stackoverflow.com/a/59634071
+def approx_size(x, name, flag="SI"):
+    """Find the byte size of a numpy array or convert a number of bytes into
+    human-relevant terms.
+    x -- Takes a numpy array, or can be an int or float of the number of bytes.
+    Output will automatically be in the nearest relevant range, e.g. KB MB etc.
+    name -- Name of the thing being measured (for print statements).
+    flag -- Output can use SI units (e.g. Megabytes) or binary (e.g Mebibytes).
+    """
+    # https://physics.nist.gov/cuu/Units/binary.html
+    units = {1000: ['KB', 'MB', 'GB', 'TB'],
+             1024: ['KiB', 'MiB', 'GiB', 'TiB']}
+    if flag == "SI":
+        mult = 1000
+    elif flag == "BINARY":
+        mult = 1024
+
+    if isinstance(x, np.ndarray):
+        print(f"* {name} array:")
+        print(f"*  dtype: {x.dtype}")
+        print(f"*  {x.itemsize} bytes per item")
+        print(f"*  items: {x.size:,}")
+        ssize = sys.getsizeof(x)
+        size = x.nbytes
+
+        for num, unit in enumerate(units[mult]):
+            ssize = ssize / mult
+            size = size / mult
+            if size < mult:
+                print(f"*  sys size: ~{ssize} {unit}")
+                print(f"*  npy size: ~{size:.5f} {unit}")
+                break
+            if num == len(units[mult]) - 1:
+                print("*  npy size: Heckin' LARGE")
+
+    elif isinstance(x, (int, float)):
+        print(f"* {name}:")
+        size = x
+
+        for num, unit in enumerate(units[mult]):
+            size = size / mult
+            if size < mult:
+                print(f"*  size: ~{size:.5f} {unit}")
+                break
+            if num == len(units[mult]) - 1:
+                print("*  size: Heckin' LARGE")
+
+    else:
+        print("'The heck is this?")
+        print(f"*  type: {type(x)}")
+
+
+# https://stackoverflow.com/a/30316760
+from types import ModuleType, FunctionType
+from gc import get_referents
+
+# Custom objects know their class.
+# Function objects seem to know way too much, including modules.
+# Exclude modules as well.
+reject = type, ModuleType, FunctionType
+
+def getsize(obj):
+    """Sum size of object & members in bytes."""
+    if isinstance(obj, reject):
+        raise TypeError('getsize() does not take argument of type: '+ str(type(obj)))
+    seen_ids = set()
+    size = 0
+    objects = [obj]
+    while objects:
+        need_referents = []
+        for o in objects:
+            print(o)
+            if not isinstance(o, reject) and id(o) not in seen_ids:
+                seen_ids.add(id(o))
+                size += sys.getsizeof(o)  # sys.getsizeof fails to get the proper size for np float64 arrays but works with int32 and float32 arrays because reasons? Or it's measuring the wrong reference maybe.
+                need_referents.append(o)
+        objects = get_referents(*need_referents)
+    return size  # Returns size of obj in bytes
