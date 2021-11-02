@@ -11,6 +11,7 @@ from util import xyz2latlon, latlon2xyz, rescale, load_settings, build_image_dat
 SBC = 5.670374419 * 10**-8  # Stefan-Boltzmann constant
 # 0.00000005670374419
 
+# ToDo: Dict is incomplete. (e.g. missing materials, and materials whose value is "0" as a placeholder)
 # Heat capacity in joules per kg per kelvin
 # Sources:
 # https://www.e-education.psu.edu/earth103/node/1005
@@ -32,6 +33,7 @@ MAT_HEAT_CAPACITY = {
     "sandstone": 0
 }
 
+# ToDo: Dict is incomplete. (e.g. missing materials, and materials whose value is "0" as a placeholder)
 # Density in kg per meter^3
 # Sources:
 # https://www.e-education.psu.edu/earth103/node/1005
@@ -55,6 +57,7 @@ MAT_DENSITY = {
     "sandstone": 2323
 }
 
+# ToDo: Dict is incomplete. (e.g. missing materials, and materials whose value is "0" as a placeholder)
 # For Earth, average albedo of the whole planet is about 0.31 (although I've seen figures ranging from 0.29 to 0.31)
 # Sources:
 # https://nsidc.org/cryosphere/seaice/processes/albedo.html
@@ -471,7 +474,7 @@ def brute_daily_insolation(verts, altitudes, radius, tilt, snapshot=False):  # T
 
         if snapshot:  #ToDo: This is quite slow.
             dictionary = {}
-            rescaled_i = rescale(surface_temps, 0, 255)  #NOTE: Due to the relative nature of rescale, if the min or max height changes then the scale will be messed up.
+            rescaled_i = rescale(surface_temps, 0, 255)  #NOTE: Due to the relative nature of rescale, if the min or max insolation changes then the scale will be messed up.
             dictionary[f"{i+1:03d}"] = rescaled_i
 
             pixel_data = build_image_data(dictionary)
@@ -585,7 +588,7 @@ def calc_yearly_insolation(points, height, radius, axial_tilt, snapshot=False):
 
         if snapshot:
             dictionary = {}
-            rescaled_i = rescale(insolation, 0, 255)  #NOTE: Due to the relative nature of rescale, if the min or max height changes then the scale will be messed up.
+            rescaled_i = rescale(insolation, 0, 255)  #NOTE: Due to the relative nature of rescale, if the min or max insolation changes then the scale will be messed up.
             dictionary[f"{x+1:03d}"] = rescaled_i
 
             pixel_data = build_image_data(dictionary)
