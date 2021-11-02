@@ -12,7 +12,7 @@ import cfg
 @njit(cache=True, parallel=True, nogil=True)
 def sample_noise(verts, perm, pgi, n_roughness=1, n_strength=0.2, radius=1):
     """Sample a simplex noise for given vertices."""
-    elevations = np.ones(len(verts))
+    elevations = np.ones(len(verts), dtype=np.float64)
 
     rough_verts = verts * n_roughness
 
@@ -23,14 +23,16 @@ def sample_noise(verts, perm, pgi, n_roughness=1, n_strength=0.2, radius=1):
     # print(elevations)
     # print(" min:", np.amin(elevations))
     # print(" max:", np.amax(elevations))
+    # NOTE: Adding +1 to elevation moves negative values in the 0-1 range.
+    # Multiplying by *0.5 drags any values > 1 back into the 0-1 range.
     return (elevations + 1) * 0.5 * n_strength * radius  # NOTE: I'm not sure if multiplying by the radius is the proper thing to do in my next implementation.
     # return elevations
 
 
-def sample_octaves(verts, elevations, perm, pgi, n_octaves=1, n_init_roughness=1.5, n_init_strength=0.4, n_roughness=2.0, n_persistence=0.5, ocean_percent=0.5, world_radius=1.0):
+def sample_octaves(verts, elevations, perm, pgi, n_octaves=1, n_init_roughness=1.5, n_init_strength=0.4, n_roughness=2.0, n_persistence=0.5, world_radius=1.0):
     """Sample octaves of noise and combine them together."""
     if elevations is None:
-        elevations = np.zeros(len(verts))
+        elevations = np.zeros(len(verts), dtype=np.float64)
     n_freq = n_init_roughness  # Frequency
     n_amp = n_init_strength  # Amplitude
     # In my separate-sampling experiment, rough/strength pairs of (1.6, 0.4) (5, 0.2) and (24, 0.02) were good for 3 octaves
@@ -57,14 +59,14 @@ def sample_octaves(verts, elevations, perm, pgi, n_octaves=1, n_init_roughness=1
     return elevations
 
 @njit(cache=True, parallel=True, nogil=True)
-def make_ocean_mask(height, ocean_level):
-    """Create an ocean mask from an array of heights and the ocean level."""
+def make_mask(height, mask_elevation):
+    """Create a mask from an array of heights and a given elevation."""
     # NOTE: Some other functions may not like that a dtype of bool_ stores "True" or "False" instead of numbers.
     # Keep an eye on that. We can always switch to int8 or uint8 and store 0 or 1 if we need to.
     mask = np.zeros(len(height), dtype=np.bool_)
 
     for h in prange(len(height)):
-        if height[h] <= ocean_level:
+        if height[h] <= mask_elevation:
             mask[h] = 1
 
     return mask
