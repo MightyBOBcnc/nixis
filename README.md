@@ -27,6 +27,7 @@ While there are many existing tools (such as [Gaea](https://quadspinner.com/), [
 * Plate tectonics and hotspots.
 * Precipitation.
 * Climate and biome maps derived from temperature and precipitation.
+* Import an existing height map and run erosion/climate/biome calculations on it.
 * Elliptical planet orbits.
 * Tidally locked planets.
 * Vegetation growth.
