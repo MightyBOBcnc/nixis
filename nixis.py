@@ -4,6 +4,7 @@ import os
 import sys
 import argparse
 import time
+from collections import defaultdict
 # import math
 # import json
 # import concurrent.futures
@@ -17,7 +18,7 @@ from matplotlib.colors import LinearSegmentedColormap
 import opensimplex as osi
 import cfg
 from util import *
-from terrain import sample_octaves, make_mask
+from terrain import sample_octaves, make_bool_elevation_mask
 from erosion import *
 from climate import *
 # pylint: disable=not-an-iterable
@@ -25,7 +26,7 @@ from climate import *
 
 # ToDo List:
 # - In the future when we have climate simulation, run a test to see if it's faster to lookup xyz2latlon as-needed or to simply store latlon for each vertex in a big master array.
-#    Or instead of storing it in RAM--and this is something applicable to all arrays--to limit RAM footprint it might be better to store most arrays in sqlite and read values
+#    NOTE: RAM considerations. Instead of storing it in RAM--and this is something applicable to all arrays--to limit RAM footprint it might be better to store most arrays on disk (such as in sqlite) and read values
 #    from disk only as-needed. However, this would depend on read/write speeds, which will vary drastically across user hardware from m.2 to 5400 RPM drives. Also I don't want to kill user drives with GBs of writes.
 # - See if there is any sort of pattern in the vertex order from meshzoo that would allow a LOD-like system or a way to know every other vertex or every N vertices so that
 #    we could use a sparser or lower-fidelity (low-fi) version of the dense sphere for some calculations. (e.g. I'm thinking of collision detection between drifting continents.)
@@ -37,7 +38,7 @@ from climate import *
 #    https://www.machinelearningplus.com/python/cprofile-how-to-profile-your-python-code
 #    Or maybe timeit https://docs.python.org/3/library/timeit.html
 #    https://www.geeksforgeeks.org/timeit-python-examples
-# - In addition to speed profiling, also do some memory profiling because this could end up needing many GB of RAM.
+# - In addition to speed profiling, also do some memory profiling because this could end up needing many GB of RAM. (the verts + tris alone need 12.6 GB of RAM--EACH--when k=7500)
 # - Note: Voroni tesselation library: https://github.com/gdmcbain/voropy
 # - Idea: Meshzoo is already really fast; I wonder if it can be @njitted (Answer: Not easily)
 # - One thing to test is that it may be faster to use predefined vertex, triangle, and adjacency arrays that we read from disk instead of building the mesh with meshzoo and building the adjacency every single time.
@@ -45,9 +46,10 @@ from climate import *
 #    of arrays to build adjacency and such.  Maybe not so useful while I'm building the program but it could be useful once the program is 'production ready'.
 #    I could optionally ship the program with precomputed arrays for download or include a precompute_arrays() function so the user can do it themselves (depending on how large the arrays are.. they'd probably be huge on disk)
 #    so they only need to precompute once.  Numpy has its own .npy and .npz formats, but of course they have to be read into RAM to actually use them. It could still be useful to juggle what is in RAM at any moment if things aren't needed.
+#    (Although numpy needs contiguous blocks of memory so things could potentially get messy if we're juggling RAM and setting things to None.)
 #
 # - Find out which takes up more bytes in RAM: color represented as RGB, HSV, or hex value, and if the 'winner' at a bit depth of 8 is still the winner at 16 or higher. (NOTE: I don't think hex can do > 8 bits)
-#    I haven't looked into this, yet, but if each channel gets its own separate number that would be 3*N bytes times V number of verts.
+#    I haven't looked into this, yet, but if each channel gets its own separate number that would be 3 channels, times N bytes, times V number of verts, or 3*N*V.
 #    For example a numpy float32 or int32 array is 4 bytes per item or 3*4*V, and a float64 or int64 array is 8 bytes per item or 3*8*V
 #    1 byte:  bool_, int8, uint8
 #    2 bytes: float16, int16, uint16
@@ -55,7 +57,7 @@ from climate import *
 #    8 bytes: float64, int64, uint64
 #    32 or 64 would be overkill for tracking 16 bits per channel, which is commonly stored as integer values, and covers a range of 0-65535, which matches the range of uint16; so 16-bits per channel would be 3 * 2 bytes * V
 #    https://petebankhead.gitbooks.io/imagej-intro/content/chapters/bit_depths/bit_depths.html
-#    There is also the option of floating point numbers which are used in HDR and such but that may be harder to work with and I'm not sure how much compatibility there is in common image editors.
+#    There is also the option of floating point numbers which are used in HDR and such but that may be harder to work with and I'm not sure how much compatibility there is in common image editors (or in the Pillow library).
 #    Another possibility is to use a palette, like a gif, instead of full RGB saved per vertex. The vertex would store a number between 0-255, for example, and that index would look up the real RGB values in a palette with 256 colors.
 #    A palette is something that will definitely be used for the simple map types like Biome, Climate, Metals, etc. because there are a limited number of biomes to choose from in a Whittaker diagram or Koppen climate classification.
 #
@@ -76,7 +78,9 @@ from climate import *
 # Style guide:
 # - For functions that need mesh data like the vertices, the vertices should be the first parameter.
 # - If the function takes an array that is indexed to the vertices, such as height or temperature, that should be the second parameter.
+# -- If it also needs the triangle data, then the triangle array should come before the others.
 # - If it takes more than one array then those should be given in an order of importance that resembles the order in which they were created, such as height, then insolation, then temperature, then precipitation
+# - Functions that create new data should be prefixed with "make_" as part of their snake_case name--e.g. make_rgb_array, make_mesh, etc.--as this is shorter than "build_", "create_", etc..
 
 class NixisPlanet:
     """Base class for Nixis planets."""  # This may or may not actually get used any time soon.
@@ -93,33 +97,47 @@ def main():
 # =============================================
     parser = argparse.ArgumentParser(
         description="Generate maps for spherical worlds.")
-    parser.add_argument("-n", "--name", type=str, 
+    parser.add_argument("-n", "--name", type=str,
         help="World name (without file extension). If not specified then \
         a default name will be used.")
-    parser.add_argument("-d", "--divisions", type=int, default=320, 
+    parser.add_argument("-d", "--divisions", type=int, default=320,
         help="Number of divisions to add to the planet mesh. 320 will make a \
         mesh with ~2 million triangles. 2500 makes a 125mil triangle mesh.")
-    parser.add_argument("-s", "--seed", type=int, 
+    parser.add_argument("-s", "--seed", type=int,
         help="A number used to seed the RNG. If not specified then a random \
         number will be used.")
-    parser.add_argument("-r", "--radius", type=float, 
-        help="Planet radius in meters. Optional. Default is 1 meter with all \
+    parser.add_argument("-r", "--radius", type=float,
+        help="Planet radius in meters. Default is 1 meter with all \
         attributes scaled to fit.")
-    parser.add_argument("-t", "--tilt", type=float, default=0.0, 
+    parser.add_argument("-t", "--tilt", type=float, default=0.0,
         help="Axial tilt of the planet, in degrees.")
-    # parser.add_argument("-lc", "--loadconfig", type=str, 
+    # parser.add_argument("-lc", "--loadconfig", type=str,
     #     help="Load the generation settings from a text file. NOTE: Any other \
     #     provided arguments will override individual settings from the file.")
-    parser.add_argument("--mesh", action="store_true", 
+    parser.add_argument("--mesh", action="store_true",
         help="Export the world as a 3D mesh file.")
-    # parser.add_argument("--pointcloud", action="store_true", 
+    # parser.add_argument("--pointcloud", action="store_true",
     #     help="Export the world as a 3D point cloud file.")
-    # parser.add_argument("--database", action="store_true", 
+    # parser.add_argument("--database", action="store_true",
     #     help="Export the world as a sqlite file.")
-    parser.add_argument("--png", action="store_true", 
+    parser.add_argument("--png", action="store_true",
         help="Save a png map of the world.")
-    parser.add_argument("--config", action="store_true", 
+    parser.add_argument("--config", action="store_true",
         help="Save the generation settings for a given world as a text file.")
+    parser.add_argument("--novis", action="store_true",
+        help="Run Nixis without visualizing the final result in PyVista. \
+        You may want to use this option for very large meshes or if you are \
+        automating the export of maps without wanting to use the 3D viewer.")
+    # ToDo: The arguments for exporting images or the mesh, etc. should possibly be renamed like --save_img, --save_config, --save_mesh, etc.
+
+    test_latlon = True
+    surface_points = defaultdict(list)
+
+    do_erode = False
+    do_climate = False
+
+    snapshot_erosion = False
+    snapshot_climate = False
 
     args = parser.parse_args()
 
@@ -131,6 +149,8 @@ def main():
     else:
         divisions = args.divisions + 1
         print(f"Even numbers only for divisions, please. Setting divisions to {divisions}.")
+    # ToDo: Let's try to estimate RAM usage based on what arguments have been passed (divisions, whether to export images, and climate/erosion flags) so we can add that to the warning.
+    # https://www.thepythoncode.com/article/get-hardware-system-information-python
     if args.divisions > 2250:
         print("\n" + "WARNING. Setting divisions to a large value can use gigabytes of RAM.")
         print(f"         The 3D mesh will have {divisions * divisions * 10 + 2:,} vertices.")
@@ -154,7 +174,7 @@ def main():
     else:
         world_name = str(world_seed) + "_" + str(divisions)
 
-    if args.radius:  # ToDo: I wonder if it's proper to do like "world_radius = args.radius or 1.0" to save a few lines of code
+    if args.radius:  # NOTE: Could do like "world_radius = args.radius if args.radius else 1.0" to save a few lines of code
         world_radius = abs(args.radius)
     else:  # NOTE: Technically speaking I should do the same as I did for divisions and simply set a default in argparse and not have this if/else statement at all.
         # world_radius = 6378100.0  # Actual earth radius in meters
@@ -166,10 +186,10 @@ def main():
         print("\n" + "Axial tilt must be in the range -90 to +90." + "\n")
         sys.exit(0)
 
-    world_albedo = 0.31
+    world_albedo = 0.31  # Approximate albedo of Earth
     orbital_distance = 149597870.7  # 1 AU in km
-    star_radius = 696340
-    star_temp = 5778  # Kelvin
+    star_radius = 696340  # Sol's radius in km
+    star_temp = 5778  # Sol's surface temperature in Kelvin
 
     options = load_settings("options.json")  # ToDo: If the user specifies args.png then we should grab the desired output maps from options.json. Right now the export_list dict is not being used at all.
     cfg.WORK_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -179,17 +199,10 @@ def main():
     img_height = options["img_height"]
     export_list = options["export_list"]
 
-    test_latlon = False
-
-    do_erode = False
-    do_climate = False
-
-    snapshot_erosion = False
-    snapshot_climate = False
-
     # ToDo: For both of the below we should possibly only try making the dir at the moment we save?
     # Test if the directory already exists. Maybe even attempt to see if we have write permission beforehand.
-    # Actual exception types
+    # ToDo: Actual exception types
+    # Also eventually these should perhaps be arguments for argparse, like --snap_e, --snap_c, or --snapshot_erosion, --snapshot_climate
     # if args.png or args.mesh or args.pointcloud or args.database or args.config:
     try:
         os.mkdir(cfg.SAVE_DIR)
@@ -229,14 +242,17 @@ def main():
     print("\n" + f"Script started at: {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}" + "\n")
 
     # NOTE: For k=2500 the mesh takes 17 seconds to build. For k=5000 it takes 69 seconds. For k=7500 it takes 159 seconds.
+    # ToDo: Consider searching for a library or algorithm that is faster and possibly that can generate only the vertices without the triangles (unsure if that's feasible; at the very least you do need to edge pairs for subdividing)
+    # in order to save RAM and avoid unnecessary computation; also one that can be @njit decorated or that has a C/C++ binary with a python interface.
+    # Or take a look at forking and stripping down the icosa_sphere function from meshzoo to only the parts that are needed and try @njit decoration again. (parts of it have optional arguments that are not needed)
+    # (NOTE: meshzoo is GPL v3; so if I do a stripped fork it'd be wise to use a separate repo and have it be a dependency)
     points, cells = create_mesh(divisions)  # points: float64, cells: int32
     if world_radius != 1:
         points *= world_radius
 
-    # print("Points:")
-    # print(points.dtype)
-    # print("Cells:")
-    # print(cells.dtype)
+    # Cells are not being used for anything if there's no erosion and no visualization
+    if args.novis and not do_erode:
+        cells = None
 
     # If I need to output several meshes for examination
     # for i in range(2, 26, 2):
@@ -267,7 +283,17 @@ def main():
         # The name kinda sucks though. Maybe we could rename it img_pixel_neighbors.
         print("Building query...")
         cfg.IMG_QUERY_DATA = cfg.KDT.query(ll, k=3, workers=-1)
+        #Performance (k=320):
+        # 2k * 1k image:   0.15 seconds
+        # 4k * 2k image:   0.65 seconds
+        # 8k * 4k image:   2.4 seconds
+        # 16k * 8k image:  14 seconds
+        # 32k * 16k image: 20 seconds
         query_end = time.perf_counter()
+
+        # Visualize the 2D pixel locations as coordinates on the 3D planet
+        # for row in ll:
+        #     surface_points["red"].extend(row)
 
         ll = None
         if not test_latlon:
@@ -283,7 +309,11 @@ def main():
     # Initialize the permutation arrays to be used in noise generation
     perm, pgi = osi.init(world_seed)  # Very fast. 0.02 secs or better
 
-    # Ocean altitude is a *relative* percent of the range from min to max altitude.
+    # min_alt = -0.05
+    # max_alt = 0.15
+    min_alt = -4000
+    max_alt = 8850
+    # Ocean percent is a *relative* percent of the range from min to max altitude.
     ocean_percent = 55.0
     n_init_rough = 1.5     # Initial roughness of first octave
     n_init_strength = 0.4  # Initial strength of first octave
@@ -301,8 +331,7 @@ def main():
     # ToDo: Consider pulling arg values from cfg.py, options.json, seed json file, or as kwargs because this line is a long boi now.
     height = sample_octaves(points, None, perm, pgi, n_octaves, n_init_rough, n_init_strength, n_roughness, n_persistence, world_radius)
 
-#    height = rescale(height, -0.05, 0.15)
-    height = rescale(height, -4000, 8850)
+    height = rescale(height, min_alt, max_alt)
 #    height = rescale(height, -4000, 0, 0, mode='lower')
 #    height = rescale(height, 0, 8850, 0, mode='upper')
 #    height = rescale(height, -1, 1)
@@ -316,7 +345,7 @@ def main():
     ocean_level = find_percent_val(minval, maxval, ocean_percent)  # NOTE: Due to the way np.clip works (hack below), values less than 0% or greater than 100% have no effect.
     print("  Ocean Level:", ocean_level)
 
-    ocean = make_mask(height, ocean_level)
+    ocean = make_bool_elevation_mask(height, ocean_level)
 
     if args.png:
         export_list["ocean"] = [ocean, 'gray']
@@ -327,24 +356,18 @@ def main():
     # Bring land down with a power > 1
     height = power_rescale(height, mask=ocean, mode=0 , power=2.0)
 
-
-    # height *= 10
-    # height += 6378100
-    # height += 400000
-    # height += world_radius - 1
-
 #    height = np.clip(height, ocean_level, maxval)  # Hack for showing an ocean level in pyvista.  It might be time to try using a 2nd sphere mesh just for water, and use masks with the scalars or something so underwater areas don't bungle the height colormap.
     # Also this clipping should probably be one of the last steps before visualizing.
     # height = np.clip(height, minval, ocean_level)
 
 
-    # height -= ocean_level  # Move the ocean level to 0; need to rescale the upper and lower halves again to regain proper min and max altitudes.
+    height -= ocean_level  # Move the ocean level to 0; need to rescale the upper and lower halves again to regain proper min and max altitudes.
 
-    # height = rescale(height, -0.05, 0.15, mid=0)
-    # minval = np.amin(height)
-    # maxval = np.amax(height)
-    # print("  Rescaled min:", minval)
-    # print("  Rescaled max:", maxval)
+    height = rescale(height, min_alt, max_alt, mid=0)
+    minval = np.amin(height)
+    maxval = np.amax(height)
+    print("  Rescaled min:", minval)
+    print("  Rescaled max:", maxval)
 
     # height = np.clip(height, 0, maxval)  # Can use 0 instead of ocean_level because we already rescaled right above here. Note that this has the effect of making the upper half steeper and the lower half flatter as the original bounds are restored.
     # NOTE: Maybe instead of subtracting the ocean level and doing another rescale, instead we only do that when multiplying the height times the vertices for the final viz.
@@ -356,15 +379,15 @@ def main():
     # So getting the terrain curves right is probably going to require multiple wacky rescale operations.
     # Continental shelves are probably going to need a power < 1 to raise them close to the land level, but ocean floor after the shelf will need a power > 1 to lower and flatten it with falloff from the shelf. Land needs a power > 1 to slope upward from coasts.
 
-    # height *= world_radius  # Keeps the scale relative. NOTE: But don't multiply here, because that messes up the display of the scalar bar in pyvista. Instead, do this multiplication down inside the visualize function.
+#    height *= world_radius  # Keeps the scale relative. NOTE: But don't multiply here, because that messes up the display of the scalar bar in pyvista. Instead, do this multiplication down inside the visualize function.
 
     if args.png and not do_erode:
         #potato = rescale(height, -4000, 8850) + 32768
         # export_list["height"] = [potato.astype('uint16'), 'gray']
         # export_list["height"] = [(rescale(height, -4000, 8850) + 32768).astype('uint16'), 'gray']
         export_list["height_absolute"] = [ (rescale(height, -4000, 8850) + (32768 - find_percent_val(-4000, 8850, ocean_percent))).astype('uint16') , 'gray']
-        print("THE THING MIN:", np.min(export_list["height_absolute"][0]))
-        print("THE THING MAX:", np.max(export_list["height_absolute"][0]))
+        print("Absolute Min:", np.min(export_list["height_absolute"][0]))
+        print("Absolute Max:", np.max(export_list["height_absolute"][0]))
         export_list["height_relative"] = [ (rescale(height, 0, 65535)).astype('uint16') , 'gray']
 
 # Erode!
@@ -478,9 +501,15 @@ def main():
         query_end = time.perf_counter()
         print(f"Query finished in {query_end - query_start :.5f} sec")
 
+        surface_points["purple"].append(llpoint)
+        surface_points["magenta"].extend([points[v] for v in llneighbors])
+
         print("neighbors:", llneighbors)
         print("neighbor distances:", lldistances)
         print("neighbor xyz:", points[llneighbors[0]], points[llneighbors[1]], points[llneighbors[2]])
+        # print(surface_points)
+        # print(np.asarray(surface_points["purple"]))
+        # print(np.asarray(surface_points["magenta"]))
 
 # Save the world map to a texture file
 # =============================================
@@ -492,22 +521,16 @@ def main():
         # Idea: We could get half-meter precision if we have an export mode where we export bathymetry separately from land elevations;
         # multiply the input array * 2 before rounding to integers, I think. Elevation starts at 0 and goes up, bathymetry starts at 65535 and goes down.
 
-        # I'm kind of thinking that maybe the CFG module should have its own dict that records what each array's mode is.. like, get the key from export_list, then like cfg.img_modes[key] gets the dtype?
-        # But how do we determine the appropriate range to rescale? Or rather are there times when rescaling to the dtype is not wanted? If the dtype is uint16 then presumably it's a heightmap, but what if I want temperature in 16-bit?
-        # Temperature ALSO has positive and negative values, though, so maybe insolation or precipitation would be a better example, because those can't have negative values.
-        # Maybe a simple dummy class for each array like how in the Context Select add-on for Blender the ObjectMode class works. So for Nixis it'd be like cfg.height.mode (RGB, gray, etc), cfg.height.dtype, cfg.height.minmax or .rescale or something?
-        # Would python allow it to be crammed into one class?  Like cfg.img.height.dtype (wow that's unfortunately long)
-        # It might just be best to restructure the export_list and the functions that handle it (aka build_image_data) to be a dict with a list inside like {"height":[height_array, mode, dtype]}
-        # for key, container in export_list.items():  container[0] is always the array, container[1] is always the mode, container[2] is always the dtype, and so on.
-        # Or instead of calling the parameter "mode", call it "channels" because that's basically what it amounts to; the number of channels the image will have. 1 for grayscale, 3 or 4 for RGB or RGBA, and the dtype controls bit depth.
-        # OR, the shit could just be properly rescaled and stuff at the end of the relevant section in nixis.py
-        # i.e. at the part where I go if args.png: export_list["height"] = height  instead becomes, like, export_list["height"] = height.astype('uint16) + 32768  or something along those lines.  Then we don't have to guess later what to do.
-        # I THINK that would preserve the original height array to be used in erosion and pyvista, and would create a copy in the export_list.  This can be tested by checking the python id for the objects, or just printing the numpy min/max for each.
-
         pixel_data = build_image_data(export_list)
         export_list = None
 
         save_start = time.perf_counter()
+        # Performance:
+        # Three 2k * 1k images:   1.15 seconds
+        # Three 4k * 2K images:   4.7 seconds
+        # Three 8k * 4k images:   18 seconds
+        # Three 16k * 8k images:  40 seconds
+        # Three 32k * 16k images: 31 seconds
         save_image(pixel_data, cfg.SAVE_DIR, world_name)
         save_end = time.perf_counter()
         print(f"Write to disk finished in  {save_end - save_start :.5f} sec")
@@ -522,43 +545,41 @@ def main():
     print("\n" + f"Computation finished at: {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}")
     print(f"Script runtime: {runtime_end - runtime_start:.3f} seconds" + "\n")
 
-    print("Preparing visualization...")
-    # The array that we want to use for the scalar bar.
-    scalars = {"s-mode":"height", "scalars":height}
-    # Possible s-modes to control the gradient used by the scalar bar:
-        # height (solid color for ocean, colors for land)
-        # bathy (colors for ocean height, solid color for land)
-        # ocean (some other ocean metric colors, solid color for land)
-        # topo (gradient has a hard break at the shore from ocean to land)
-        # surface temperature or surface insolation (which is uniform for the full surface from min to max without weird breaks at the land/ocean border)
-    # visualize(points, cells, height, scalars, search_point=llpoint, neighbors=llneighbors, radius=world_radius, tilt=current_tilt)
-#    visualize(points * (np.reshape(height, (len(points), 1)) + 1), cells, height, scalars, tilt=current_tilt)  # NOTE: Adding +1 to height means values only grow outward if range is 0-1. But for absolute meter ranges it merely throws the values off by 1.
+    if not args.novis:
 
-    # NOTE: Adding +1 to height means values only grow outward if range is 0-1. But for absolute meter ranges it merely throws the values off by 1.
-    # NOTE: Figure out the proper way to multiply points times the absolute heights to maintain the correct radius.
-    # I think it's Verts * (1 + H/R)
-    # points *= np.reshape(height + 1 + world_radius - 1, (len(points), 1))  # So, not this way
+        print("Preparing visualization...")
+        # The array that we want to use for the scalar bar.
+        scalars = {"s-mode":"height", "scalars":height}
+        # Possible s-modes to control the gradient used by the scalar bar:
+            # height (solid color for ocean, colors for land)
+            # bathy (colors for ocean height, solid color for land)
+            # ocean (some other ocean metric colors, solid color for land)
+            # topo (gradient has a hard break at the shore from ocean to land)
+            # surface temperature or surface insolation (which is uniform for the full surface from min to max without weird breaks at the land/ocean border)
 
-    # print("Before points")
-    # print(points)
+        # Reshaping the heights to match the shape of the vertices array so we can multiply the verticies * the heights.
+        scale_size = 0.1  # Exaggerate the scale to be visible to the naked eye from orbit
+        if scale_size == 0:  # Flatten everything
+            scale_factor = 0
+        elif scale_size == 1:  # Real scale
+            scale_factor = 1
+        else:  # Use exaggerated scale
+            scale_factor = world_radius / max_alt * scale_size
+            print("Exaggerated terrain scale factor is", scale_factor)
+#        points *= np.reshape(height/world_radius + 1, (len(points), 1))  # Rather, do it this way instead. NOTE: This should really be done inside the visualize function.
+        # https://gamedev.net/forums/topic/316602-increase-magnitude-of-a-vector-by-a-value/3029750/
+#        points *= np.reshape((height-ocean_level)/world_radius + 1, (len(points), 1))  # Rather, do it this way instead. NOTE: This should really be done inside the visualize function.
+        points *= np.reshape(height * scale_factor/world_radius + 1, (len(points), 1))
 
-    # Reshaping the heights to match the shape of the vertices array so we can multiply the verticies * the heights.
-    # points *= np.reshape(height/world_radius + 1, (len(points), 1))  # Rather, do it this way instead. NOTE: This should really be done inside the visualize function.
-    # https://gamedev.net/forums/topic/316602-increase-magnitude-of-a-vector-by-a-value/3029750/
-    points *= np.reshape((height-ocean_level)/world_radius + 1, (len(points), 1))  # Rather, do it this way instead. NOTE: This should really be done inside the visualize function.
+        # print("After points")
+        # print(points)
 
-    # print("After points")
-    # print(points)
+        visualize(points, cells, height, scalars, zero_level=ocean_level, surf_points=surface_points, radius=world_radius, tilt=current_tilt)
 
-    if test_latlon:
-        visualize(points, cells, height, scalars, zero_level=ocean_level, search_point=llpoint, neighbors=llneighbors, radius=world_radius, tilt=current_tilt)
-    else:
-        visualize(points, cells, height, scalars,  zero_level=ocean_level, radius=world_radius, tilt=current_tilt)
-
-    # ToDo: PyVista puts execution 'on hold' while it visualizes. After the user closes it execution resumes.
-    # Consider asking the user right here if they want to save out the result as a png/mesh/point cloud.
-    # (Only if those options weren't passed as arguments at the beginning, else do that arg automatically and don't ask)
-    # (There's also a PyVista mode that runs in the background and can be repeatedly updated? Look into that.)
+        # ToDo: PyVista puts execution 'on hold' while it visualizes. After the user closes it execution resumes.
+        # Consider asking the user right here if they want to save out the result as a png/mesh/point cloud.
+        # (Only if those options weren't passed as arguments at the beginning, else do that arg automatically and don't ask)
+        # (There's also a PyVista mode that runs in the background and can be repeatedly updated? Look into that.)
 
 # Cleanup
 # =============================================
@@ -567,7 +588,7 @@ def main():
     #     os.remove(temp_path)
 
 
-def visualize(verts, tris, heights=None, scalars=None, zero_level=0.0, search_point=None, neighbors=None, radius=1.0, tilt=0.0):
+def visualize(verts, tris, heights=None, scalars=None, zero_level=0.0, surf_points=None, radius=1.0, tilt=0.0):
     """Visualize the output."""
     # pyvista expects that faces have a leading number telling it how many
     # vertices a face has, e.g. [3, 0, 11, 5] where 3 means triangle.
@@ -581,14 +602,22 @@ def visualize(verts, tris, heights=None, scalars=None, zero_level=0.0, search_po
     print(f"Time to reshape triangle array: {time_end - time_start :.5f} sec")
 
     # Create pyvista mesh from our icosphere
+    time_start = time.perf_counter()
     mesh = pv.PolyData(verts, new_tris)
+    time_end = time.perf_counter()
+    print(f"Time to create the PyVista planet mesh: {time_end - time_start :.5f} sec")
     # Separate mesh for ocean water
     ocean_shell = pv.ParametricEllipsoid(radius, radius, radius, u_res=300, v_res=300)
 
-    if search_point is not None and neighbors is not None:
+    pl = pv.Plotter()
+
+    # Build any surface points or other floating points
+    if surf_points is not None:
         # Is it strictly necessary that these be np.arrays?
-        neighbor_dots = pv.PolyData(np.array([verts[v] for v in neighbors]))
-        search_dot = pv.PolyData(np.array(search_point))
+        for key, data in surf_points.items():
+            dots = pv.PolyData(np.array(data))
+            pl.add_mesh(dots, point_size=10.0, color=key)
+
     x_axisline = pv.Line([-1.5*radius,0,0],[1.5*radius,0,0])
     y_axisline = pv.Line([0,-1.5*radius,0],[0,1.5*radius,0])
     z_axisline = pv.Line([0,0,-1.5*radius],[0,0,1.5*radius])
@@ -618,7 +647,8 @@ def visualize(verts, tris, heights=None, scalars=None, zero_level=0.0, search_po
     red = np.array([1, 0, 0, 1])
 
     # Derive percentage of transition from ocean to land from zero level
-    cmap_zl1 = ( (zero_level - minval) / (maxval - minval) ) - 0.001
+    # cmap_zl1 = ( (zero_level - minval) / (maxval - minval) ) - 0.001
+    cmap_zl1 = ( (0 - minval) / (maxval - minval) ) - 0.001
     cmap_zl0 = cmap_zl1 - 0.001
     print("cmap transition lower:", cmap_zl0)
     print("cmap transition upper:", cmap_zl1)
@@ -639,14 +669,10 @@ def visualize(verts, tris, heights=None, scalars=None, zero_level=0.0, search_po
     # "Current"? ".items()"? https://stackoverflow.com/questions/3545331/how-can-i-get-dictionary-key-as-variable-directly-in-python-not-by-searching-fr
     # https://stackoverflow.com/questions/16819222/how-to-return-dictionary-keys-as-a-list-in-python
 
-    pl = pv.Plotter()
     # pl.add_mesh(mesh, show_edges=False, smooth_shading=True, color="white", below_color="blue", culling="back", scalars=scalars["scalars"], cmap=custom_cmap, scalar_bar_args=sargs, annotations=anno)
     pl.add_mesh(mesh, show_edges=False, smooth_shading=True, color="white", culling="back", scalars=scalars["scalars"], cmap=custom_cmap, scalar_bar_args=sargs, annotations=anno)
     pl.add_mesh(ocean_shell, show_edges=False, smooth_shading=True, color="blue", opacity=0.15)
 
-    if search_point is not None and neighbors is not None:
-        pl.add_mesh(neighbor_dots, point_size=15.0, color = "magenta")
-        pl.add_mesh(search_dot, point_size=15.0, color = "purple")
     pl.add_mesh(x_axisline, line_width=5, color = "red")
     pl.add_mesh(y_axisline, line_width=5, color = "green")
     pl.add_mesh(z_axisline, line_width=5, color = "blue")
