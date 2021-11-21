@@ -59,7 +59,7 @@ def sample_octaves(verts, elevations, perm, pgi, n_octaves=1, n_init_roughness=1
     return elevations
 
 @njit(cache=True, parallel=True, nogil=True)
-def make_mask(height, mask_elevation):
+def make_bool_elevation_mask(height, mask_elevation):
     """Create a mask from an array of heights and a given elevation."""
     # NOTE: Some other functions may not like that a dtype of bool_ stores "True" or "False" instead of numbers.
     # Keep an eye on that. We can always switch to int8 or uint8 and store 0 or 1 if we need to.
