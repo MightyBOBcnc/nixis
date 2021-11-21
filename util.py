@@ -43,7 +43,9 @@ def create_mesh(divisions):
     points, cells = mz.icosa_sphere(divisions)
     time_end = time.perf_counter()
     print(f"Number of vertices: {points.shape[0]:,}")  # points: np.float64
+    approx_size(points, "vertices")
     print(f"Number of triangles: {cells.shape[0]:,}")  # cells: np.int32
+    approx_size(cells, "triangles")
     print(f"Mesh generated in {time_end - time_start :.5f} sec")
     return points, cells
 
@@ -55,8 +57,12 @@ def create_mesh(divisions):
 
 # https://stackoverflow.com/questions/56945401/converting-xyz-coordinates-to-longitutde-latitude-in-python/56945561#56945561
 @njit(cache=True)
-def xyz2latlon(x, y, z, r=1):
-    """Convert 3D spatial XYZ coordinates into Latitude and Longitude."""
+def xyz2latlon(x, y, z, r):
+    """Convert 3D spatial XYZ coordinates into Latitude and Longitude.
+    x -- X coordinate.
+    y -- Y coordinate.
+    z -- Z coordinate.
+    r -- World radius."""
     # Old method; will output NaNs if (Z/R) > 1 or (Z/R) < -1
     # lat = np.degrees(np.arcsin(z / r))
 
@@ -71,8 +77,11 @@ def xyz2latlon(x, y, z, r=1):
 # This answer is mostly right but we have to compensate for degrees/radians.
 # https://stackoverflow.com/questions/1185408/converting-from-longitude-latitude-to-cartesian-coordinates/1185413#1185413
 @njit(cache=True)
-def latlon2xyz(lat, lon, r=1):
-    """Convert Latitude and Longitude into 3D spatial XYZ coordinates."""
+def latlon2xyz(lat, lon, r):
+    """Convert Latitude and Longitude into 3D spatial XYZ coordinates.
+    lat -- Latitude.
+    lon -- Longitude.
+    r -- World radius."""
     x = r * np.cos(lat*(np.pi/180)) * np.cos(lon*(np.pi/180))
     y = r * np.cos(lat*(np.pi/180)) * np.sin(lon*(np.pi/180))
     z = r * np.sin(lat*(np.pi/180))
@@ -286,8 +295,8 @@ def make_ll_arr(width, height, radius):
     lat = 90
     lon = -180
     latpercent = 180 / (height - 1)
-    # lonpercent = 360 / (width - 1)
-    lonpercent = 360 / width  # ToDo: Fix hairline seam where the image wraps around the sides. We don't actually want to reach -180 because it's the same as +180. (Might not be an issue at higher subdivisions >= 900)
+    # lonpercent = 360 / (width - 1)  # ToDo: Fix hairline seam where the image wraps around the sides. We don't actually want to reach -180 because it's the same as +180. (Might not be an issue at higher subdivisions >= 900)
+    lonpercent = 360 / width  # NOTE: When the 2D lat/lon coordinates are visualized on the 3D planet it shows that this method (combined with the MAX operation below) places a column of pixels right on the 180 longitude (at least for a 2k map).
 
     # Loop through Latitude starting at north pole. Pixels are filled per row.
     for h in prange(height):
@@ -315,6 +324,7 @@ def make_rgb_array(width, height, dists, nbrs, colors):
         for w in prange(width):
             # ToDo: For certain maps like a B&W land/water mask, or the tectonic plate map I might actually want hard borders without the anti-aliased smoothing of averages along the edges.
             # For this perhaps I could have the function take an argument like 'AA' for anti-aliashed.  If True, use the weighted distance logic. Else use a different logic. Maybe even split the logics out to different functions.
+            # The other logic could possibly use the weighted distance logic with 1 extra step on the end that simply rounds to either the lowest or highest value (e.g. 0 or 1, 0 or 255).
             # https://math.stackexchange.com/questions/3817854/formula-for-inverse-weighted-average-smaller-value-gets-higher-weight
             sd = np.sum(dists[h][w])  # Sum of distances
             # Add a tiny amount to each i to (hopefully) prevent NaN and div by 0 errors
@@ -343,6 +353,7 @@ def make_gray_array(width, height, dists, nbrs, colors):
         for w in prange(width):
             # ToDo: For certain maps like a B&W land/water mask, or the tectonic plate map I might actually want hard borders without the anti-aliased smoothing of averages along the edges.
             # For this perhaps I could have the function take an argument like 'AA' for anti-aliashed.  If True, use the weighted distance logic. Else use a different logic. Maybe even split the logics out to different functions.
+            # The other logic could possibly use the weighted distance logic with 1 extra step on the end that simply rounds to either the lowest or highest value (e.g. 0 or 1, 0 or 255).
             # https://math.stackexchange.com/questions/3817854/formula-for-inverse-weighted-average-smaller-value-gets-higher-weight
             sd = np.sum(dists[h][w])  # Sum of distances
             # Add a tiny amount to each i to (hopefully) prevent NaN and div by 0 errors
@@ -398,6 +409,12 @@ def build_image_data(colors=None):  # Could rename this to like make_image_data 
         if mode in ('rgb', 'RGB'):
             pixels = make_rgb_array(width, height, dists, nbrs, array)
         elif mode in ('gray', 'GRAY', 'grey', 'GREY'):
+            # Performance:
+            # 2k * 1k:   0.4 to 1.5 seconds
+            # 4k * 2k:   1.5 to 2.5 seconds
+            # 8k * 4k:   5 to 7 seconds
+            # 16k * 8k:  24 seconds
+            # 32k * 16k: 94 seconds, but something fails somewhere and an incomplete image gets written to disk; possibly a Pillow problem.
             pixels = make_gray_array(width, height, dists, nbrs, array)
         time_end = time.perf_counter()
 
@@ -640,7 +657,7 @@ def approx_size(x, name, flag="SI"):
     human-relevant terms.
     x -- Takes a numpy array, or can be an int or float of the number of bytes.
     Output will automatically be in the nearest relevant range, e.g. KB MB etc.
-    name -- Name of the thing being measured (for print statements).
+    name -- Name of the thing being measured (a label for print statements).
     flag -- Output can use SI units (e.g. Megabytes) or binary (e.g Mebibytes).
     """
     # https://physics.nist.gov/cuu/Units/binary.html
