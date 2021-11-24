@@ -1,12 +1,21 @@
+<div align="center">
+
+**⚠ Nixis is still early in development and will undergo many breaking changes. ⚠  
+The structure is a mess and the files are full of enormous tracts of commented notes and it is most definitely not pep-8 compliant.**
+
+</div>
+
 # Nixis
 A python program for procedurally generating planet-scale maps for spherical worlds.
+
+![](https://github.com/MightyBOBcnc/nixis/blob/main/docs/nixis_preview.jpg)
 
 While there are many existing tools (such as [Gaea](https://quadspinner.com/), [TerreSculptor](http://www.demenzunmedia.com/home/terresculptor/), [World Machine](https://www.world-machine.com/), and [World Creator](https://www.world-creator.com/)) that can create plausibly realistic-looking terrain for small areas (a few kilometers squared) there are few to none that do so for a full-sized spherical planet.  In this instance "plausibly realistic-looking" refers to a terrain that incorporates principles of hydraulic erosion and weathering such that it resembles real terrain that has been acted upon by these natural forces over time.  Existing tools that apply erosion algorithms on small or flat terrains are not programmed to compensate for the distortion that is introduced by mapping a sphere onto a rectangular image.
 
 ## What This Project Is
 * The goal of this project is to use principles of hydraulic erosion and tectonic activity to create large-scale features like continents, mountain chain distributions, rivers, and water sheds that appear believable at planetary scales on a spherical planet. 
 * Given that the objective is planetary scales, the size of the smallest feature is not expected to be smaller than about one kilometer or a few kilometers per pixel.  See NASA's Visible Earth (Blue Marble) [topography](https://visibleearth.nasa.gov/images/73934/topography) and [bathymetry](https://visibleearth.nasa.gov/images/73963/bathymetry) maps for reference.
-* The output of the tool is saved as a series of [equirectangular texture maps](https://en.wikipedia.org/wiki/Equirectangular_projection) that can be used in 3D graphics applications such as Maya, Blender, Unreal Engine, Unity, etc. for video game graphics, visual effects, or animation. 
+* The output of the tool is saved as a series of [equirectangular texture maps](https://en.wikipedia.org/wiki/Equirectangular_projection) that can be used in 3D graphics applications such as Maya, Blender, Unreal Engine, Unity, etc. for video game graphics, visual effects, or animation. (Other map projections may be forthcoming at a later time that would be more useful for e.g. a D&D or other TTRPG campaign map; see roadmap below.)
 
 ## What This Project *Is Not*
 * A fully scientific planetary simulation is not the goal of this project.  Shortcuts and approximations are used for the sake of simplicity and performance.  As long as the output of the program looks *plausibly* realistic it need not be perfectly realistic or fully scientific for our purposes.
@@ -14,26 +23,44 @@ While there are many existing tools (such as [Gaea](https://quadspinner.com/), [
 * Flat worlds, disc worlds, ring worlds, and terrains that wrap in both the X and Y direction need not apply.  There are many tools that can already cater to those styles.  Nixis is for spherical planets.
 
 ## Assumptions and Limitations
+* **At the moment Nixis can only export grayscale maps for elevation, solar insolation, and an ocean/land mask. RGB exports will be added later.**
 * Calculations assume that the planet is spherical or very close to spherical (i.e. the calculations would be skewed if you made a small potato-like moon or asteroid).
 * Calculations assume the planet's distance from its star is constant (a perfectly circular orbit).
 * Measurements and calculations are in metric units.
 * Planets don't have moons.
 * No support for binary (or more) stars or planets.
 * No support for tidally locked planets.
-* Nixis gobbles lots of RAM.
+* Nixis gobbles lots of RAM when you specify a large number of divisions with the `-d` or `--divisions` argument.
 
 ## Roadmap (in no particular order)
+### Definitive features:
+* Temperature driven by solar insolation (insolation has been implemented but needs to be converted into temperature).
 * Hydraulic erosion.
+* RGB image exports for land and ocean coloration.
 * Plate tectonics and hotspots.
 * Precipitation.
 * Climate and biome maps derived from temperature and precipitation.
 * Import an existing height map and run erosion/climate/biome calculations on it.
-* Elliptical planet orbits.
-* Tidally locked planets.
 * Vegetation growth.
 * Track soil fertility.
 * Distribution of different minerals and resources (e.g. limestone, sandstone, useful metals, etc.).
-* Climate-driven winds and pressures and weather.
+### Tentative features (subject to cancellation):
+* Some additional map projections for export (e.g. [Mercator](https://en.wikipedia.org/wiki/Mercator_projection)).
+* .svg export of river networks and watersheds (and possibly other geological features).
+* Insolation and climate-driven winds and pressures and weather.
+* Elliptical planet orbits.
+* Tidally locked planets.
+* Clouds.
+
+-----
+## Installation and Use
+(Better instructions coming later.)
+
+Nixis is being developed in an [Anaconda environment](https://www.anaconda.com/) with Python 3.8.x (other versions have not been tested against). You can install the requirements from `requirements.yaml` (most of the packages are dependencies of a few main packages: PyVista, SciPy, Pillow, Numba, NumPy, etc.).
+
+After setting up your environment you can run `python nixis.py -h` or `python nixis.py --help` for arguments. 
+
+A smart workflow would be to generate a few planets with random seed numbers and a default number of divisions without exporting maps to quickly find a seed that you like, then increase the resolution and divisions with your chosen seed for a more detailed export. Higher levels of subdivision and larger images take longer to process.
 
 -----
 ## options.json
@@ -45,11 +72,11 @@ Important settings are stored in the options.json file in the main directory. Wh
     "img_width": 2048,              # Width of exported images (It is recommended that this be 2x the height)
     "img_height": 1024,             # Height of exported images (It is recommended that this be 0.5x the width)
     "img_format": "png",            # Format of exported images (In theory any format supported by Pillow should work)
-    "bit_depth": 16,                # Bit-depth per channel of exported images
-    "export_list": {},              # A dict of which maps should be exported (e.g. height, temperature, biome, etc.)
+    "bit_depth": 16,                # (Currently unused) Bit-depth per channel of exported images
+    "export_list": {},              # (Currently unused) A dict of which maps should be exported (e.g. height, temperature, biome, etc.)
     "mesh_format": "obj",           # Format of exported 3D mesh files
-    "point_format": "ply",          # Format of exported 3D point clouds
-    "settings_format": "json",      # Format of Nixis settings and exported world seeds
-    "database_format": "sqlite3"    # Format of exported planet databases
+    "point_format": "ply",          # (Currently unused) Format of exported 3D point clouds
+    "settings_format": "json",      # Format of exported world seeds
+    "database_format": "sqlite3"    # (Currently unused) Format of exported planet databases
 }
 ```
