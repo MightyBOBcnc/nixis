@@ -1,23 +1,18 @@
-"""A program to generate detailed maps for spherical worlds."""
+"""A program to generate detailed maps for spherical worlds.
+Use -h or --help for arguments."""
 
 import os
 import sys
 import argparse
 import time
 from collections import defaultdict
-# import math
-# import json
-# import concurrent.futures
-# import meshio as mi
-# import meshzoo as mz
 import numpy as np
-from numba import njit, prange
-import pyvista as pv
-from matplotlib.colors import LinearSegmentedColormap
-# from scipy.spatial import KDTree
+# from numba import njit, prange
+# import pyvista as pv
 import opensimplex as osi
 import cfg
 from util import *
+from gui import visualize
 from terrain import sample_octaves, make_bool_elevation_mask
 from erosion import *
 from climate import *
@@ -102,36 +97,36 @@ def main():
         a default name will be used.")
     parser.add_argument("-d", "--divisions", type=int, default=320,
         help="Number of divisions to add to the planet mesh. 320 will make a \
-        mesh with ~2 million triangles. 2500 makes a 125mil triangle mesh.")
+        mesh with ~2 million triangles. 2500 makes a 125mil triangle mesh. \
+        Default is 320.")
     parser.add_argument("-s", "--seed", type=int,
         help="A number used to seed the RNG. If not specified then a random \
         number will be used.")
     parser.add_argument("-r", "--radius", type=float,
-        help="Planet radius in meters. Default is 1 meter with all \
-        attributes scaled to fit.")
+        help="Planet radius in meters. Default is Earth's radius.")
     parser.add_argument("-t", "--tilt", type=float, default=0.0,
         help="Axial tilt of the planet, in degrees.")
     # parser.add_argument("-lc", "--loadconfig", type=str,
     #     help="Load the generation settings from a text file. NOTE: Any other \
     #     provided arguments will override individual settings from the file.")
-    parser.add_argument("--mesh", action="store_true",
+    parser.add_argument("--save_mesh", action="store_true",
         help="Export the world as a 3D mesh file.")
-    # parser.add_argument("--pointcloud", action="store_true",
+    # parser.add_argument("--save_pointcloud", action="store_true",
     #     help="Export the world as a 3D point cloud file.")
-    # parser.add_argument("--database", action="store_true",
+    # parser.add_argument("--save_database", action="store_true",
     #     help="Export the world as a sqlite file.")
-    parser.add_argument("--png", action="store_true",
+    parser.add_argument("--save_img", action="store_true",
         help="Save a png map of the world.")
-    parser.add_argument("--config", action="store_true",
+    parser.add_argument("--save_config", action="store_true",
         help="Save the generation settings for a given world as a text file.")
     parser.add_argument("--novis", action="store_true",
         help="Run Nixis without visualizing the final result in PyVista. \
         You may want to use this option for very large meshes or if you are \
         automating the export of maps without wanting to use the 3D viewer.")
-    # ToDo: The arguments for exporting images or the mesh, etc. should possibly be renamed like --save_img, --save_config, --save_mesh, etc.
 
-    test_latlon = True
+    # Dict to store any marker points we'd like to render
     surface_points = defaultdict(list)
+    test_latlon = False
 
     do_erode = False
     do_climate = False
@@ -177,8 +172,8 @@ def main():
     if args.radius:  # NOTE: Could do like "world_radius = args.radius if args.radius else 1.0" to save a few lines of code
         world_radius = abs(args.radius)
     else:  # NOTE: Technically speaking I should do the same as I did for divisions and simply set a default in argparse and not have this if/else statement at all.
-        # world_radius = 6378100.0  # Actual earth radius in meters
-        world_radius = 1.0  # In meters
+        world_radius = 6378100.0  # Actual earth radius in meters
+        # world_radius = 1.0  # In meters
 
     if -90.0 <= args.tilt <= 90.0:  # ToDo: Make sure that the temperature and daily rotation calculations aren't fragile and then expand this to allow larger tilts.
         axial_tilt = args.tilt      # e.g. Uranus and Venus have tilts > 90 (97 and 177, respectively) and several planets have retrograde rotation.
@@ -191,19 +186,22 @@ def main():
     star_radius = 696340  # Sol's radius in km
     star_temp = 5778  # Sol's surface temperature in Kelvin
 
-    options = load_settings("options.json")  # ToDo: If the user specifies args.png then we should grab the desired output maps from options.json. Right now the export_list dict is not being used at all.
+    options = load_settings("options.json")  # ToDo: If the user specifies args.save_img then we should grab the desired output maps from options.json. Right now the export_list dict is not being used at all.
     cfg.WORK_DIR = os.path.dirname(os.path.abspath(__file__))
     cfg.SAVE_DIR = os.path.join(cfg.WORK_DIR, options["save_folder"])
     cfg.SNAP_DIR = os.path.join(cfg.WORK_DIR, options["save_folder"], options["snapshot_folder"])
     img_width = options["img_width"]
     img_height = options["img_height"]
-    export_list = options["export_list"]
+    export_maps = options["export_list"]  # Maps to export.
+
+    # Dict to store world data for image export
+    export_list = {}
 
     # ToDo: For both of the below we should possibly only try making the dir at the moment we save?
     # Test if the directory already exists. Maybe even attempt to see if we have write permission beforehand.
     # ToDo: Actual exception types
     # Also eventually these should perhaps be arguments for argparse, like --snap_e, --snap_c, or --snapshot_erosion, --snapshot_climate
-    # if args.png or args.mesh or args.pointcloud or args.database or args.config:
+    # if args.save_img or args.save_mesh or args.save_pointcloud or args.save_database or args.save_config:
     try:
         os.mkdir(cfg.SAVE_DIR)
     except:
@@ -229,7 +227,7 @@ def main():
     }
 
     # Save the world configuration as a preset
-    if args.config:
+    if args.save_config:
         save_settings(cfg.WORLD_CONFIG, cfg.SAVE_DIR, world_name + '_config', fmt=options["settings_format"])
 
 # Start the party
@@ -260,7 +258,7 @@ def main():
     #     save_mesh(a, b, cfg.SAVE_DIR, f"{i:02}" + '_smooth')
 
     # Saving the mesh here just writes a plain sphere with no elevation offsets (for debug)
-    # if args.mesh:
+    # if args.save_mesh:
     #     save_mesh(points, cells, cfg.SAVE_DIR, world_name + '_smooth')
 
 # Prepare KD Tree and stuff for image saving
@@ -269,7 +267,7 @@ def main():
     # ToDo: Test compact_nodes and balanced_tree args for build/query performance tradeoffs
     # NOTE: I've tested as high as k=7500 and the KD Tree took 264 seconds to build. Amazingly the query for the LL array only took half a second.
     # The Tree takes 114 seconds to build for k=5000, and 26 seconds for k=2500
-    if args.png or snapshot_erosion or snapshot_climate:
+    if args.save_img or snapshot_erosion or snapshot_climate:
         time_start = time.perf_counter()
         # Array of 3D coordinates on the sphere for each pixel that will be in the exported image.
         ll = make_ll_arr(img_width, img_height, world_radius)
@@ -347,7 +345,7 @@ def main():
 
     ocean = make_bool_elevation_mask(height, ocean_level)
 
-    if args.png:
+    if args.save_img:
         export_list["ocean"] = [ocean, 'gray']
 
     # Bring ocean floors up with a power < 1
@@ -381,7 +379,7 @@ def main():
 
 #    height *= world_radius  # Keeps the scale relative. NOTE: But don't multiply here, because that messes up the display of the scalar bar in pyvista. Instead, do this multiplication down inside the visualize function.
 
-    if args.png and not do_erode:
+    if args.save_img and not do_erode:
         #potato = rescale(height, -4000, 8850) + 32768
         # export_list["height"] = [potato.astype('uint16'), 'gray']
         # export_list["height"] = [(rescale(height, -4000, 8850) + 32768).astype('uint16'), 'gray']
@@ -415,7 +413,7 @@ def main():
 
         # print(newheight)
 
-        if args.png:
+        if args.save_img:
             export_list["height"] = [height, 'gray']
 
 # Climate Stuff
@@ -443,7 +441,7 @@ def main():
         temp_end = time.perf_counter()
         print(f"Assign surface temps runtime: {temp_end-temp_start:.5f} sec")
 
-        if args.png:
+        if args.save_img:
             export_list["surface_temp"] = [surface_temps, 'gray']
 
         # ====================
@@ -458,7 +456,7 @@ def main():
             insol_2 = calc_instant_insolation(points, height, world_radius, 0, current_tilt)
             temp_end = time.perf_counter()
             print(f"Runtime: {temp_end-temp_start:.5f} sec")
-            if args.png:
+            if args.save_img:
                 export_list["instant_insol"] = [insol_2, 'gray']
 
         # NOTE: Version '2.5'
@@ -469,10 +467,10 @@ def main():
         print(f"Runtime: {temp_end-temp_start:.5f} sec")
 
         # daily_insolation *= (tsi/360)  # Compared to the NASA data for 1980 this is off by like 20 Watts or so, but the cosine angle is basically perfect.
-        if args.png:
+        if args.save_img:
             export_list["daily_insolation"] = [daily_insolation, 'gray']
 
-        do_annual = False
+        do_annual = True
         if do_annual:
             print("Calculating annual solar insolation (slice method)...")
             temp_start = time.perf_counter()
@@ -480,7 +478,7 @@ def main():
             temp_end = time.perf_counter()
             print(f"Runtime: {temp_end-temp_start:.5f} sec")
 
-            if args.png:
+            if args.save_img:
                 export_list["annual_insolation"] = [annual_insolation, 'gray']
 
         # calc_equilibrium_temp()
@@ -513,11 +511,14 @@ def main():
 
 # Save the world map to a texture file
 # =============================================
-    if args.png:
+# ToDo: Something to investigate later is that it might be better to save each image as soon as its source data (height, temperature, etc.) has been calculated
+# rather than waiting to do all of them at the end (possible RAM use considerations).
+    if args.save_img:
         print("Saving world map image(s)...")
 
-        # ToDo: 16-bit images (rescale 0-65535 with 32768 as sea level--if heights are absolute already, just add 32768--and save support in the save_image util function)
-        # (For RGB this may require abandoning the pillow library but for grayscale pillow should still work)
+        # ToDo: 16-bit images.
+        # For grayscale exports* this has already been added to Nixis but for RGB this may require abandoning the pillow library. https://github.com/python-pillow/Pillow/issues/1888
+        # *e.g. elevations rescale 0-65535 with 32768 as sea level (but when heights are already absolute just add 32768)
         # Idea: We could get half-meter precision if we have an export mode where we export bathymetry separately from land elevations;
         # multiply the input array * 2 before rounding to integers, I think. Elevation starts at 0 and goes up, bathymetry starts at 65535 and goes down.
 
@@ -549,13 +550,13 @@ def main():
 
         print("Preparing visualization...")
         # The array that we want to use for the scalar bar.
-        scalars = {"s-mode":"height", "scalars":height}
+        scalars = {"s-mode":"elevation", "scalars":height}
         # Possible s-modes to control the gradient used by the scalar bar:
-            # height (solid color for ocean, colors for land)
-            # bathy (colors for ocean height, solid color for land)
-            # ocean (some other ocean metric colors, solid color for land)
-            # topo (gradient has a hard break at the shore from ocean to land)
-            # surface temperature or surface insolation (which is uniform for the full surface from min to max without weird breaks at the land/ocean border)
+            # topography (solid color for ocean, colors for land)
+            # bathymetry (colors for ocean height, solid color for land)
+            # ocean (some other ocean metric colors, maybe currents, solid color for land)
+            # elevation (gradient has a hard break at the shore from ocean to land)
+            # temperature and insolation (which is uniform for the full surface from min to max without weird breaks at the land/ocean border)
 
         # Reshaping the heights to match the shape of the vertices array so we can multiply the verticies * the heights.
         scale_size = 0.1  # Exaggerate the scale to be visible to the naked eye from orbit
@@ -587,101 +588,6 @@ def main():
     # if os.path.exists(temp_path):
     #     os.remove(temp_path)
 
-
-def visualize(verts, tris, heights=None, scalars=None, zero_level=0.0, surf_points=None, radius=1.0, tilt=0.0):
-    """Visualize the output."""
-    # pyvista expects that faces have a leading number telling it how many
-    # vertices a face has, e.g. [3, 0, 11, 5] where 3 means triangle.
-    # https://docs.pyvista.org/examples/00-load/create-poly.html
-    # So we fill an array with the number '3' and merge it with the cells
-    # from meshzoo to get a proper array for pyvista.
-    time_start = time.perf_counter()
-    tri_size = np.full((len(tris), 1), 3)
-    new_tris = np.hstack((tri_size, tris))
-    time_end = time.perf_counter()
-    print(f"Time to reshape triangle array: {time_end - time_start :.5f} sec")
-
-    # Create pyvista mesh from our icosphere
-    time_start = time.perf_counter()
-    mesh = pv.PolyData(verts, new_tris)
-    time_end = time.perf_counter()
-    print(f"Time to create the PyVista planet mesh: {time_end - time_start :.5f} sec")
-    # Separate mesh for ocean water
-    ocean_shell = pv.ParametricEllipsoid(radius, radius, radius, u_res=300, v_res=300)
-
-    pl = pv.Plotter()
-
-    # Build any surface points or other floating points
-    if surf_points is not None:
-        # Is it strictly necessary that these be np.arrays?
-        for key, data in surf_points.items():
-            dots = pv.PolyData(np.array(data))
-            pl.add_mesh(dots, point_size=10.0, color=key)
-
-    x_axisline = pv.Line([-1.5*radius,0,0],[1.5*radius,0,0])
-    y_axisline = pv.Line([0,-1.5*radius,0],[0,1.5*radius,0])
-    z_axisline = pv.Line([0,0,-1.5*radius],[0,0,1.5*radius])
-
-    # Axial tilt line
-    # ax, ay, az = latlon2xyz(tilt, 45, radius)
-    ax, ay, az = latlon2xyz(tilt, 0, radius)
-    t_axisline = pv.Line([0,0,0], [ax * 1.5, ay * 1.5, az * 1.5])
-
-    # Sun tilt line (line that is perpendicular to the incoming solar flux)
-    # ax, ay, az = latlon2xyz(90-tilt, -135, radius)
-    ax, ay, az = latlon2xyz(90-tilt, 180, radius)
-    s_axisline = pv.Line([0,0,0], [ax * 1.5, ay * 1.5, az * 1.5])
-
-    # Clip the heights again so we can show water separately from land gradient
-    # by cleverly using the below_color for anything below what we clip here.
-    minval = np.amin(heights)
-    maxval = np.amax(heights)
-    # heights = np.clip(heights, minval*1.001, maxval)
-
-    # ===============
-    # Define the colors we want to use
-    blue = np.array([12/256, 238/256, 246/256, 1])
-    black = np.array([11/256, 11/256, 11/256, 1])
-    grey = np.array([189/256, 189/256, 189/256, 1])
-    yellow = np.array([255/256, 247/256, 0/256, 1])
-    red = np.array([1, 0, 0, 1])
-
-    # Derive percentage of transition from ocean to land from zero level
-    # cmap_zl1 = ( (zero_level - minval) / (maxval - minval) ) - 0.001
-    cmap_zl1 = ( (0 - minval) / (maxval - minval) ) - 0.001
-    cmap_zl0 = cmap_zl1 - 0.001
-    print("cmap transition lower:", cmap_zl0)
-    print("cmap transition upper:", cmap_zl1)
-
-    custom_cmap = LinearSegmentedColormap.from_list('ocean_and_topo', [(0, [0.1,0.2,0.6]), (cmap_zl0, [0.8,0.8,0.65]), (cmap_zl1, [0.3,0.4,0.0]), (1, [1,1,1])])
-    # ===============
-
-    # https://matplotlib.org/cmocean/
-    # https://docs.pyvista.org/examples/02-plot/cmap.html
-    # https://colorcet.holoviz.org/
-    # sargs = dict(below_label="Ocean", n_labels=0, label_font_size=15)
-    sargs = dict(n_labels=0, label_font_size=12, position_y=0.07)
-    # anno = {minval:f"{minval:.2}", zero_level:"0.00", maxval:f"{maxval:.2}"}
-    anno = {minval:f"{minval:.2}", find_percent_val(minval, maxval, cmap_zl0*100):"0.00", maxval:f"{maxval:.2}"}
-
-    # ToDo: Add title to the scalar bar sargs and dynamically change it based on what is being visualized (e.g. Elevation, Surface Temperature, etc.)
-    # title="whatever" (remove the quotes and make 'whatever' into a variable, like the s-mode or whatever. like title=scalars["s-mode"])
-    # "Current"? ".items()"? https://stackoverflow.com/questions/3545331/how-can-i-get-dictionary-key-as-variable-directly-in-python-not-by-searching-fr
-    # https://stackoverflow.com/questions/16819222/how-to-return-dictionary-keys-as-a-list-in-python
-
-    # pl.add_mesh(mesh, show_edges=False, smooth_shading=True, color="white", below_color="blue", culling="back", scalars=scalars["scalars"], cmap=custom_cmap, scalar_bar_args=sargs, annotations=anno)
-    pl.add_mesh(mesh, show_edges=False, smooth_shading=True, color="white", culling="back", scalars=scalars["scalars"], cmap=custom_cmap, scalar_bar_args=sargs, annotations=anno)
-    pl.add_mesh(ocean_shell, show_edges=False, smooth_shading=True, color="blue", opacity=0.15)
-
-    pl.add_mesh(x_axisline, line_width=5, color = "red")
-    pl.add_mesh(y_axisline, line_width=5, color = "green")
-    pl.add_mesh(z_axisline, line_width=5, color = "blue")
-    pl.add_mesh(t_axisline, line_width=5, color = "magenta")
-    pl.add_mesh(s_axisline, line_width=5, color = "yellow")
-    pl.show_axes()
-    pl.enable_terrain_style(mouse_wheel_zooms=True)  # Use turntable style navigation
-    print("Sending to PyVista.")
-    pl.show()
 
 # =============================================
 
