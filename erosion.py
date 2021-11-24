@@ -1,7 +1,7 @@
 """Module of erosion functions."""
 import random
 import numpy as np
-from numba import jit, njit, prange
+from numba import njit, prange
 import cfg
 from util import *
 # pylint: disable=not-an-iterable
@@ -16,6 +16,8 @@ from util import *
 #   A function for aeolian (wind) eroosion? (NOTE: The effects of such erosion are likely very small at the scale Nixis works at)
 #   A function for glacial erosion
 #   A function for ocean/sea/lake beach erosion
+#     https://en.wikipedia.org/wiki/Coast#Geologic_processes
+#     https://en.wikipedia.org/wiki/Beach#Erosion_and_accretion
 #   A function for ocean current (ocean floor) erosion 
 #     (NOTE: The deeper a water body is, the less erosion there is at the floor. This is because water flow is extremely slow at high depths. Sediment capacity is enormous, however.)
 #     https://en.wikipedia.org/wiki/Turbidite
