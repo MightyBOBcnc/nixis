@@ -554,16 +554,27 @@ def export_planet(data, path, name):
 
 # https://math.stackexchange.com/questions/2110160/find-percentage-value-between-2-numbers
 def find_percent_val(minval, maxval, percent):
-    """Find the percentage value between a min and max number.
+    """Find the value that is the desired percent between a min and max number.
     minval -- The low number of the range.
     maxval -- The high number of the range.
-    percent -- A number from 0.0 to 100.0 (inclusive)."""
+    percent -- A number between 0.0 and 100.0."""
     if not 0.0 < percent < 100.0:
-        print("\n" + "    ERROR: Percent must be between 0 and 100 (inclusive).")
+        print("\n" + "    ERROR: Percent must be between 0 and 100.")
         print("    Defaulting to 50 percent." + "\n")
         percent = 50.0
 
     return minval + ((maxval - minval) * percent / 100.0)
+
+def find_val_percent(minval, maxval, x):
+    """Find the percentage of a value, x, between a min and max number.
+    minval -- The low number of the range.
+    maxval -- The high number of the range.
+    x -- A value between the min and max value."""
+    if not minval < x < maxval:
+        print("\n" + "    ERROR: X must be between minval and maxval.")
+        print("    Defaulting to 50 percent because why not Zoidberg. (\/)ಠ,,,ಠ(\/)" + "\n")
+    
+    return (x - minval) / (maxval - minval) * 100
 
 # https://stackoverflow.com/questions/7632963/numpy-find-first-index-of-value-fast/29799815#29799815
 @njit(cache=True)
@@ -652,13 +663,14 @@ def sort_adjacency(adj):
 
 
 # Based on https://stackoverflow.com/a/59634071
-def approx_size(x, name, flag="SI"):
+def approx_size(x, name, flag="SI", verbose=False):
     """Find the byte size of a numpy array or convert a number of bytes into
     human-relevant terms.
     x -- Takes a numpy array, or can be an int or float of the number of bytes.
     Output will automatically be in the nearest relevant range, e.g. KB MB etc.
     name -- Name of the thing being measured (a label for print statements).
     flag -- Output can use SI units (e.g. Megabytes) or binary (e.g Mebibytes).
+    verbose -- Print additional info if x is a numpy array. Default: False
     """
     # https://physics.nist.gov/cuu/Units/binary.html
     units = {1000: ['KB', 'MB', 'GB', 'TB'],
@@ -670,9 +682,10 @@ def approx_size(x, name, flag="SI"):
 
     if isinstance(x, np.ndarray):
         print(f"* {name} array:")
-        print(f"*  dtype: {x.dtype}")
-        print(f"*  {x.itemsize} bytes per item")
-        print(f"*  items: {x.size:,}")
+        if verbose:
+            print(f"*  dtype: {x.dtype}")
+            print(f"*  {x.itemsize} bytes per item")
+            print(f"*  items: {x.size:,}")
         ssize = sys.getsizeof(x)
         size = x.nbytes
 
@@ -680,7 +693,8 @@ def approx_size(x, name, flag="SI"):
             ssize = ssize / mult
             size = size / mult
             if size < mult:
-                print(f"*  sys size: ~{ssize} {unit}")
+                if verbose:
+                    print(f"*  sys size: ~{ssize} {unit}")
                 print(f"*  npy size: ~{size:.5f} {unit}")
                 break
             if num == len(units[mult]) - 1:
