@@ -33,7 +33,7 @@ While there are many existing tools (such as [Gaea](https://quadspinner.com/), [
 * Nixis gobbles lots of RAM when you specify a large number of divisions with the `-d` or `--divisions` argument.
 
 ## Roadmap (in no particular order)
-### Definitive features:
+### Planned features:
 * Temperature driven by solar insolation (insolation has been implemented but needs to be converted into temperature).
 * Hydraulic erosion.
 * RGB image exports for land and ocean coloration.
