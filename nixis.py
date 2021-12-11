@@ -123,6 +123,7 @@ def main():
         help="Run Nixis without visualizing the final result in PyVista. \
         You may want to use this option for very large meshes or if you are \
         automating the export of maps without wanting to use the 3D viewer.")
+    # ToDo: Arg for user-defined output path\folder.
 
     # Dict to store any marker points we'd like to render
     surface_points = defaultdict(list)
@@ -192,7 +193,7 @@ def main():
     cfg.SNAP_DIR = os.path.join(cfg.WORK_DIR, options["save_folder"], options["snapshot_folder"])
     img_width = options["img_width"]
     img_height = options["img_height"]
-    export_maps = options["export_list"]  # Maps to export.
+    export_maps = options["export_list"]  # Maps to export. (not used at the moment)
 
     # Dict to store world data for image export
     export_list = {}
@@ -261,6 +262,9 @@ def main():
     # if args.save_mesh:
     #     save_mesh(points, cells, cfg.SAVE_DIR, world_name + '_smooth')
 
+    # Show the locations of the 12 verts with connectivity 5 for dev/debug purposes
+    surface_points["cyan"].extend(points[:12])
+
 # Prepare KD Tree and stuff for image saving
 # =============================================
 
@@ -305,6 +309,8 @@ def main():
 # Sample noise for initial terrain heights
 # =============================================
     # Initialize the permutation arrays to be used in noise generation
+    # ToDo: Test the updated opensimplex library and see if it has good performance so we wouldn't have to use our custom fork.
+    # https://github.com/lmas/opensimplex/issues/4#issuecomment-934671121
     perm, pgi = osi.init(world_seed)  # Very fast. 0.02 secs or better
 
     # min_alt = -0.05
@@ -383,7 +389,8 @@ def main():
         #potato = rescale(height, -4000, 8850) + 32768
         # export_list["height"] = [potato.astype('uint16'), 'gray']
         # export_list["height"] = [(rescale(height, -4000, 8850) + 32768).astype('uint16'), 'gray']
-        export_list["height_absolute"] = [ (rescale(height, -4000, 8850) + (32768 - find_percent_val(-4000, 8850, ocean_percent))).astype('uint16') , 'gray']
+        # export_list["height_absolute"] = [ (rescale(height, -4000, 8850) + (32768 - find_percent_val(-4000, 8850, ocean_percent))).astype('uint16') , 'gray']
+        export_list["height_absolute"] = [ (height + 32768).astype('uint16'), 'gray']
         print("Absolute Min:", np.min(export_list["height_absolute"][0]))
         print("Absolute Max:", np.max(export_list["height_absolute"][0]))
         export_list["height_relative"] = [ (rescale(height, 0, 65535)).astype('uint16') , 'gray']
@@ -396,7 +403,7 @@ def main():
 # =============================================
     if do_erode:
         neighbors = build_adjacency(cells)
-        sort_adjacency(neighbors)
+#        sort_adjacency(neighbors)
 
         # print(height)
         # print(type(height[0][0]))
@@ -407,14 +414,24 @@ def main():
         # the mask and becomes part of the land points.
 
         erode_start = time.perf_counter()
-        erode_terrain3(points, neighbors, height, num_iter=11, snapshot=snapshot_erosion)  # ToDo: Placing the neighbors before the height probably violates my style guide.
+        erode_terrain2(points, neighbors, height, num_iter=20, snapshot=snapshot_erosion)  # ToDo: Placing the neighbors before the height probably violates my style guide.
+        average_terrain2(cells, height, num_iter=3)
+        # average_terrain_weighted(points, cells, height, num_iter=30)
         erode_end = time.perf_counter()
         print(f"Erosion runtime: {erode_end-erode_start:.5f}")
 
         # print(newheight)
 
+        # ToDo: The ocean mask needs to be updated during/after erosion.
+        #  At the moment it isn't updated after initial creation from the
+        #  simplex noise height.
+
         if args.save_img:
-            export_list["height"] = [height, 'gray']
+            # export_list["height"] = [height, 'gray']
+            export_list["height_absolute"] = [ (height + 32768).astype('uint16'), 'gray']
+            print("Absolute Min:", np.min(export_list["height_absolute"][0]))
+            print("Absolute Max:", np.max(export_list["height_absolute"][0]))
+            export_list["height_relative"] = [ (rescale(height, 0, 65535)).astype('uint16') , 'gray']
 
 # Climate Stuff
 # =============================================
@@ -550,7 +567,7 @@ def main():
 
         print("Preparing visualization...")
         # The array that we want to use for the scalar bar.
-        scalars = {"s-mode":"elevation", "scalars":height}
+        scalars = {"s-mode":"temperature", "scalars":height}
         # Possible s-modes to control the gradient used by the scalar bar:
             # topography (solid color for ocean, colors for land)
             # bathymetry (colors for ocean height, solid color for land)
@@ -566,7 +583,7 @@ def main():
             scale_factor = 1
         else:  # Use exaggerated scale
             scale_factor = world_radius / max_alt * scale_size
-            print("Exaggerated terrain scale factor is", scale_factor)
+            print("  Exaggerated terrain scale factor is", scale_factor)
 #        points *= np.reshape(height/world_radius + 1, (len(points), 1))  # Rather, do it this way instead. NOTE: This should really be done inside the visualize function.
         # https://gamedev.net/forums/topic/316602-increase-magnitude-of-a-vector-by-a-value/3029750/
 #        points *= np.reshape((height-ocean_level)/world_radius + 1, (len(points), 1))  # Rather, do it this way instead. NOTE: This should really be done inside the visualize function.
@@ -574,6 +591,12 @@ def main():
 
         # print("After points")
         # print(points)
+
+        # ToDo: Get user confirmation for large meshes (large in the sense of vertex count but possibly also in radius)
+        if args.save_mesh:
+            if len(points) < 1500000:
+                save_mesh(points, cells, cfg.SAVE_DIR, world_name + '_final')
+            # else: # get user confirmation
 
         visualize(points, cells, height, scalars, zero_level=ocean_level, surf_points=surface_points, radius=world_radius, tilt=current_tilt)
 
