@@ -18,32 +18,43 @@ from util import *
 #   A function for ocean/sea/lake beach erosion
 #     https://en.wikipedia.org/wiki/Coast#Geologic_processes
 #     https://en.wikipedia.org/wiki/Beach#Erosion_and_accretion
-#   A function for ocean current (ocean floor) erosion 
+#   A function for ocean current (ocean floor) erosion
 #     (NOTE: The deeper a water body is, the less erosion there is at the floor. This is because water flow is extremely slow at high depths. Sediment capacity is enormous, however.)
 #     https://en.wikipedia.org/wiki/Turbidite
 # Function for making a graph of river flow
 #   Use graph for svg output of rivers
 #   Use graph for grouping/splitting/showing individual water sheds
 # Track soil movement for nutrients and fertility (good places for plant growth)
-# NOTE: The USGS Landsat dataset tracking crop growth is beautiful. You can see the exact locations where all the fields for each crop type, which correlates with geography and soil fertility, of course. It's a data set you rarely see.
+# NOTE: The USGS Landsat dataset tracking crop growth is beautiful. You can see the exact locations where all the fields for each crop type are, which correlates with geography and soil fertility, of course. It's a data set you rarely see.
 #       Mostly one just thinks of crops generically at the state level. It's amazing to see the small localized areas for certain crops and realize that we're all depending on this small area for that crop (not counting imports, of course).
 # Salinity of water bodies (salt lakes, mainly)
 # This page is unrelated to erosion but I do want to try the 'virtual pipe' method, and this page mentions that the flow rate through a pipe is the square of the diameter? But it also says that if you increase the pressure it's the square root of pressure?
 # http://homework.uoregon.edu/pub/class/es202/GRL/dwh.html
 
+
+# https://www.archtoolbox.com/representation/geometry/slope.html
 @njit(cache=True)
 def calc_slope(v0, v1, dist):
+    """Calculates slope as a percentage."""
     return (v1 - v0) / (dist + 0.00001)
 
 @njit(cache=True)
-def calc_distance(v0, v1):
-    return np.sqrt( (v0[0] - v1[0])**2 + (v0[1] - v1[1])**2 +(v0[2] - v1[2])**2 )
+def calc_slope_deg(v0, v1, dist):
+    """Calculates slope as degrees."""
+    return np.rad2deg(np.arctan( (v1 - v0) / (dist + 0.00001) ))
 
 @njit(cache=True)
-def erode_terrain1(nodes, neighbors, heights, num_iter=1, snapshot=None):
+def calc_distance(v0, v1):
+    """Calculates distance between two XYZ coordinates.
+    v0 and v1 must both be iterable with 3 items each."""
+    return np.sqrt( (v0[0] - v1[0])**2 + (v0[1] - v1[1])**2 + (v0[2] - v1[2])**2 )
+
+@njit(cache=True)
+def erode_terrain1(nodes, neighbors, heights, num_iter=1, snapshot=False):
     print("Starting terrain erosion...")
     if num_iter <= 0:
         num_iter = 1
+        print(" ERROR: Cannot have less than 1 iteration.")
 
     # read_buffer = heights.view(dtype=np.float64)  # Numba no like for some reason
 
@@ -101,10 +112,11 @@ def erosion_iteration1(neighbors, r_buff, w_buff):
 # =========================
 
 @njit(cache=True)
-def erode_terrain2(nodes, neighbors, heights, num_iter=1, snapshot=None):
+def erode_terrain2(nodes, neighbors, heights, num_iter=1, snapshot=False):
     print("Starting terrain erosion...")
     if num_iter <= 0:
         num_iter = 1
+        print(" ERROR: Cannot have less than 1 iteration.")
 
     water = np.zeros_like(heights)  # ToDo: Dtypes!  Save RAM?!
     sediment = np.zeros_like(heights)  # ToDo: Dtypes!  Save RAM?!
@@ -136,12 +148,18 @@ def erode_terrain2(nodes, neighbors, heights, num_iter=1, snapshot=None):
 # https://perso.liris.cnrs.fr/aparis/public_html/posts/terrain_erosion.html
 # https://perso.liris.cnrs.fr/aparis/public_html/posts/terrain_erosion_2.html
 
-@njit(cache=True, parallel=True, nogil=True)                         # I think I accidentally implemented thermal erosion instead of hydraulic erosion because this doesn't use or transport the water or sediment yet.
+@njit(cache=True, parallel=True, nogil=True)                         # I think I accidentally implemented a crude thermal erosion instead of hydraulic erosion because this doesn't use or transport the water or sediment yet.
 def erosion_iteration2(verts, neighbors, r_buff, wat, sed, w_buff):  # However the erosion doesn't have a cutoff angle like talus slippage (talus slips only happen at steep slopes) so it's more akin to a gaussian blur.
-    simple_constant = 0.05                                           # I'm also seeing hex patterns emerge after more iterations.
+    simple_constant = 0.05                                           # I'm also seeing hex patterns emerge after more iterations. It's also kinda noisy. The terraces are cool, though. Maybe combine with average_terrain function.
+    simple_constant = 0.0005
+    # A constant of 0.05 works fine when the world_radius is 1.0 and the elevation spread is -0.05 to +0.15
+    # and a constant of 0.0005 works with a world_radius of 6378100.0 and an elevation spread of -4000 to +8850
+    # so what is the relation?  It's not linear because the orders of magnitude of difference between 1 and 6 million (6) is different than the order of magnitude of difference between 0.05 and 0.0005 (2).
+    # Down below we are multiplying the constant times the distance between neighbor verts so it's related to the ratio of distance between verts and the world radius (which I've previously found is hard to calculate).
+    # So maybe go back to that spreadsheet of distances between verts and see what those are when multiplied by 0.05 and 0.0005
 
     # For every vertex index
-    for i in prange(len(neighbors)):
+    for i in prange(len(verts)):
         # random.seed(i)  # This produces an interesting terraced effect but is suuuper slow
         thisvert = r_buff[i]
         # print("Before:", thisvert)
@@ -160,7 +178,7 @@ def erosion_iteration2(verts, neighbors, r_buff, wat, sed, w_buff):  # However t
                 if slope > 0:  # Neighbor is higher than this vert
                     amt += simple_constant * d * random.random()  # Multiplying by a constant like 0.7 instead of random.random produces its own interesting result; as does not multiplying by anything at all (simple_constant * d only)
                 elif slope < 0:  # Neighbor is lower than this vert
-                    amt -= simple_constant * d * random.random()
+                    amt -= simple_constant * d * random.random()  # NOTE: Parenthesis needed?
 
         w_buff[i] = thisvert + amt
         # print("after:", w_buff[i])
@@ -173,6 +191,7 @@ def erode_terrain3(nodes, neighbors, heights, num_iter=1, snapshot=False):
     print("Starting terrain erosion...")
     if num_iter <= 0:
         num_iter = 1
+        print(" ERROR: Cannot have less than 1 iteration.")
 
     water = np.zeros_like(heights)  # ToDo: Dtypes!  Save RAM?!
     sediment = np.zeros_like(heights)  # ToDo: Dtypes!  Save RAM?!
@@ -185,8 +204,9 @@ def erode_terrain3(nodes, neighbors, heights, num_iter=1, snapshot=False):
 
         if snapshot:  #ToDo: This is quite slow.
             dictionary = {}
-            rescaled_h = rescale(heights, 0, 255)  #NOTE: Due to the relative nature of rescale, if the min or max height changes then the scale will be messed up.
-            dictionary[f"{i+1:03d}"] = rescaled_h
+            # rescaled_h = rescale(heights, 0, 255)  #NOTE: Due to the relative nature of rescale, if the min or max height changes then the scale will be messed up.
+            # dictionary[f"{i+1:03d}"] = rescaled_h
+            dictionary[f"{i+1:03d}"] = [ (heights + 32768).astype('uint16'), 'gray']
 
             pixel_data = build_image_data(dictionary)
             save_image(pixel_data, cfg.SNAP_DIR, "erosion_snapshot")
@@ -236,15 +256,15 @@ def erosion_iteration3(verts, neighbors, r_buff, wat, sed):
 
                 # This is where any information about the layers of sediment/rock/etc and the hardness of the exposed layer will happen
                 if slope > 0:  # Neighbor is higher than this vert
-                    sed_amt += solubility * wat[n]# * d
-                    wat_amt += wat[n] * d
+                    sed_amt += (solubility * wat[n])# * d  # NOTE: Parenthesis needed?
+                    wat_amt += (wat[n] * d)  # NOTE: Parenthesis needed?
 
                     # print(" Adding", max(solubility * wat[n], 0), "to sed_amt")
                     # print(" Adding", max(wat[n] * d, 0), "to wat_amt")
 
                 elif slope < 0:  # Neighbor is lower than this vert
-                    sed_amt -= solubility * wat[n]# * d
-                    wat_amt -= wat[n] * d
+                    sed_amt -= (solubility * wat[n])# * d  # NOTE: Parenthesis needed?
+                    wat_amt -= (wat[n] * d)  # NOTE: Parenthesis needed?
 
                     # print(" Subtracting", max(solubility * wat[n], 0), "from sed_amt")
                     # print(" Subtracting", max(wat[n] * d, 0), "from wat_amt")
@@ -261,7 +281,7 @@ def erosion_iteration3(verts, neighbors, r_buff, wat, sed):
 
         height_buffer[i] -= sed_amt
         sed_buffer[i] += sed_amt
-        water_buffer[i] += wat_amt - wat_amt * evaporation
+        water_buffer[i] += (wat_amt - wat_amt * evaporation)  # NOTE: Parenthesis needed?
         if sed_buffer[i] > (capacity * water_buffer[i]):
             height_buffer[i] += (sed_buffer[i] - (capacity * water_buffer[i]))
             sed_buffer[i] -= (sed_buffer[i] - (capacity * water_buffer[i]))
@@ -281,10 +301,11 @@ def erosion_iteration3(verts, neighbors, r_buff, wat, sed):
 # =========================
 
 @njit(cache=True)
-def erode_terrain4(nodes, neighbors, heights, num_iter=1, snapshot=None):
+def erode_terrain4(nodes, neighbors, heights, num_iter=1, snapshot=False):
     print("Starting terrain erosion...")
     if num_iter <= 0:
         num_iter = 1
+        print(" ERROR: Cannot have less than 1 iteration.")
 
     water = np.zeros_like(heights)  # ToDo: Dtypes!  Save RAM?!
     sediment = np.zeros_like(heights)  # ToDo: Dtypes!  Save RAM?!
@@ -340,15 +361,15 @@ def erosion_iteration4(verts, neighbors, r_buff, wat, sed):
 
                 # This is where any information about the layers of sediment/rock/etc and the hardness of the exposed layer will happen
                 if slope > 0:  # Neighbor is higher than this vert
-                    sed_amt += max(solubility * wat[n], 0)# * d
-                    wat_amt += max(wat[n] * d, 0)
+                    sed_amt += max(solubility * wat[n], 0)# * d  # NOTE: Parenthesis needed?
+                    wat_amt += max(wat[n] * d, 0)  # NOTE: Parenthesis needed?
 
                     # print(" Adding", max(solubility * wat[n], 0), "to sed_amt")
                     # print(" Adding", max(wat[n] * d, 0), "to wat_amt")
 
                 elif slope < 0:  # Neighbor is lower than this vert
-                    sed_amt -= max(solubility * wat[n], 0)# * d
-                    wat_amt -= max(wat[n] * d, 0)
+                    sed_amt -= max(solubility * wat[n], 0)# * d  # NOTE: Parenthesis needed?
+                    wat_amt -= max(wat[n] * d, 0)  # NOTE: Parenthesis needed?
 
                     # print(" Subtracting", max(solubility * wat[n], 0), "from sed_amt")
                     # print(" Subtracting", max(wat[n] * d, 0), "from wat_amt")
@@ -383,10 +404,11 @@ def erosion_iteration4(verts, neighbors, r_buff, wat, sed):
 # =========================
 
 #@njit(cache=True)
-def erode_terrain5(nodes, neighbors, heights, num_iter=1, snapshot=None):
+def erode_terrain5(nodes, neighbors, heights, num_iter=1, snapshot=False):
     print("Starting terrain erosion...")
     if num_iter <= 0:
         num_iter = 1
+        print(" ERROR: Cannot have less than 1 iteration.")
 
     for i in range(num_iter):
         print("  Erosion pass:", i+1,"of", num_iter)
@@ -403,9 +425,9 @@ def find_lowest(vert, nbr, height):
     if lowest < height[vert]:
         return find_first(lowest, alts)
     else:
-        return None
+        return -1
 
-#@njit(cache=True, parallel=False, nogil=False)
+@njit(cache=True, parallel=False, nogil=False)
 def erosion_iteration5(verts, neighbors, r_buff, iteration):
     height_buffer = np.copy(r_buff)
 
@@ -415,15 +437,16 @@ def erosion_iteration5(verts, neighbors, r_buff, iteration):
 
     np.random.seed(iteration)
     drop_starts = np.random.randint(0, len(verts), size=num_drops)
-    carried_soil = 0
+    # carried_soil = 0
 
     for i in range(num_drops):
         drop_loc = drop_starts[i]
         dest = find_lowest(drop_loc, neighbors[drop_loc], r_buff)
         # print("Start loc:", drop_loc)
         # print("Next loc:", dest)
+        carried_soil = 0
 
-        while dest is not None:
+        while dest != -1:
             d = calc_distance(verts[drop_loc], verts[dest])
             slope = calc_slope(r_buff[drop_loc], r_buff[dest], d)
 
@@ -441,7 +464,7 @@ def erosion_iteration5(verts, neighbors, r_buff, iteration):
             if dest != prev_loc:
                 continue
             else:
-                dest = None
+                dest = -1
             # print("Next loc:", dest)
         else:
             height_buffer[drop_loc] += carried_soil
@@ -453,6 +476,7 @@ def erosion_iteration5(verts, neighbors, r_buff, iteration):
 
 # =========================
 
+# Triangle based erosion as opposed to vertex based erosion.
 def erode_terrain6(cells):
     print("Not implemented yet")
 
@@ -464,3 +488,151 @@ def erode_terrain6(cells):
 # https://numpy.org/doc/stable/reference/generated/numpy.ufunc.at.html
 # https://github.com/nschloe/npx#sum_atadd_at
 
+
+# =========================
+
+# Observation 1: At higher levels of iterations (like 10+)
+#   some line artifacts appear around the 12 verts with connectivity 5.
+#   But that's far more iterations than should be used.
+#   Perhaps a distance-weighted average like my image exports could solve that.
+
+# Observation 2: The averaging effect becomes much weaker when the dvisions
+#   increase because each vertex becomes much closer to each other vertex.
+#   We should build an improved function that can average over a larger area.
+#   (more than just the immediate 5 or 6 neighbors) (might need KD Tree)
+#   I'd also like the ability to control the strength of the averaging, sort of
+#   like setting the visibility of a layer in Photoshop to [0 to 100] percent
+#   so that the below layer (original heights) can peek through.
+
+# Observation 3: After implementing a distance-weighted average function
+#   the line artifacts from observation 1 are still present. This leads me to
+#   suspect that it is actually caused by the change in edge flow of the
+#   triangles at the 'seams' connecting the 12 original vertices. The edge
+#   artifacts seem effectively identical for the simple average method
+#   and the weighted average method. And really since we are averaging
+#   heights and not the actual vertex coordinates I don't think heights should
+#   even be able to cause such an issue so it would have to be somethign else.
+#   It also continues to happen at twice the divisions (320 --> 640)
+#   and also doesn't appear to affect the exported height png so it has to be
+#   something to do with the mesh itself.
+def average_terrain1(tris, height, num_iter=1, snapshot=False):
+    """Average terrain heights in place."""
+    print("Averaging terrain...")
+    if num_iter <= 0:
+        num_iter = 1
+        print(" ERROR: Cannot have less than 1 iteration.")
+
+    neighbors = build_adjacency(tris)
+
+    for i in range(num_iter):
+        print("  Pass:", i+1,"of", num_iter)
+        avg_terrain_iteration1(neighbors, height)
+
+@njit(cache=True, parallel=True, nogil=True)
+def avg_terrain_iteration1(nbrs, r_buff):
+    """For each vertex, set its height to the average of its neighbors' heights,
+    ignoring its own height (average only ring 1, excluding center vertex)."""
+    height_buffer = np.copy(r_buff)
+
+    for v in prange(12):
+        new = 0.0
+        for n in nbrs[v][:5]:
+            new += height_buffer[n]
+        r_buff[v] = new / 5
+
+    for v in prange (12, len(nbrs)):
+        new = 0.0
+        for n in nbrs[v]:
+            new += height_buffer[n]
+        r_buff[v] = new / 6
+
+# This version is a little more crisp than averaging only ring 1.
+# (Which makes sense because taking the average of ring 1 only is
+# effectively discarding some data, making it less accurate.)
+def average_terrain2(tris, height, num_iter=1, snapshot=False):
+    """Average terrain heights in place."""
+    print("Averaging terrain...")
+    if num_iter <= 0:
+        num_iter = 1
+        print(" ERROR: Cannot have less than 1 iteration.")
+
+    neighbors = build_adjacency(tris)
+
+    for i in range(num_iter):
+        print("  Pass:", i+1,"of", num_iter)
+        avg_terrain_iteration2(neighbors, height)
+
+@njit(cache=True, parallel=True, nogil=True)
+def avg_terrain_iteration2(nbrs, r_buff):
+    """For each vertex, set its height to the average of its own and its
+    neighbors' heights."""
+    height_buffer = np.copy(r_buff)
+
+    for v in prange(12):
+        new = 0.0
+        for n in nbrs[v][:5]:
+            new += height_buffer[n]
+        new += height_buffer[v]
+        r_buff[v] = new / 6
+
+    for v in prange (12, len(nbrs)):
+        new = 0.0
+        for n in nbrs[v]:
+            new += height_buffer[n]
+        new += height_buffer[v]
+        r_buff[v] = new / 7
+
+# Ring 1 average only, I think?
+def average_terrain_weighted(verts, tris, height, num_iter=1, snapshot=False):
+    """Average terrain heights in place using a distance weighted average.
+    For each vertex, set its height to the distance weighted average of ring 1
+    around that vertex, not including the height of the center vertex(?)."""
+    print("Averaging terrain...")
+    if num_iter <= 0:
+        num_iter = 1
+        print(" ERROR: Cannot have less than 1 iteration.")
+
+    neighbors = build_adjacency(tris)
+
+    time_start = time.perf_counter()
+    distances = build_distances(verts, neighbors)
+    time_end = time.perf_counter()
+    print(f"  Time to build vertex neighbor distances: {time_end - time_start :.5f} sec")
+
+    for i in range(num_iter):
+        print("  Pass:", i+1,"of", num_iter)
+        avg_terrain_weighted_iteration(verts, neighbors, distances, height)
+
+@njit(cache=True, parallel=True, nogil=True)
+def build_distances(verts, nbrs):
+    """Find distances to each vertex's neighbors."""
+    result = np.ones_like(nbrs, dtype=np.float64)
+
+    for v in prange(len(verts)):
+        for i, n in enumerate(nbrs[v]):
+            result[v][i] = calc_distance(verts[v], verts[n])
+    return result
+
+@njit(cache=True, parallel=True, nogil=True)
+def avg_terrain_weighted_iteration(verts, nbrs, dists, r_buff):
+    height_buffer = np.copy(r_buff)
+
+    for v in prange(12):
+        sd = np.sum(dists[v][:5])  # Sum of distances
+        # Add a tiny amount to each i to (hopefully) prevent NaN and div by 0 errors
+        ws = np.array([1 / ((i+0.00001) / sd) for i in dists[v][:5]], dtype=np.float64)  # weights
+        t = np.sum(ws)  # Total sum of weights
+        iw = np.array([i/t for i in ws], dtype=np.float64)  # Inverted weights
+        value = np.sum(np.array([height_buffer[nbrs[v][i]]*iw[i] for i in range(len(iw))]))
+
+        r_buff[v] = value
+
+    for v in prange(12, len(nbrs)):
+        sd = np.sum(dists[v])  # Sum of distances
+        # Add a tiny amount to each i to (hopefully) prevent NaN and div by 0 errors
+        ws = np.array([1 / ((i+0.00001) / sd) for i in dists[v]], dtype=np.float64)  # weights
+        t = np.sum(ws)  # Total sum of weights
+        iw = np.array([i/t for i in ws], dtype=np.float64)  # Inverted weights
+        value = np.sum(np.array([height_buffer[nbrs[v][i]]*iw[i] for i in range(len(iw))]))
+
+        r_buff[v] = value
