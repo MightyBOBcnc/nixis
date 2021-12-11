@@ -97,6 +97,16 @@ def c_to_kelvin(c):
     """Convert temperature from Celsius to Kelvin."""
     return c + 273.15
 
+@njit(cache=True)
+def to_signed(x):
+    """Convert unsigned value (0 to 1) to signed (-1 to 1)."""
+    return (x - 0.5) * 2.0
+
+@njit(cache=True)
+def to_unsigned(x):
+    """Convert signed value (-1 to 1) to unsigned (0 to 1)."""
+    return (x + 1.0) / 2.0
+
 # https://stats.stackexchange.com/questions/351696/normalize-an-array-of-numbers-to-specific-range
 # https://learn.64bitdragon.com/articles/computer-science/data-processing/min-max-normalization
 # ToDo: Need to take a closer look at the shape of the data that is acceptable for this function
@@ -619,7 +629,7 @@ def build_adjacency(triangles):
     # e.g. The triangles [0,11,5] and [0,10,11] would produce [0-->11] and [11-->0] pairs when sliced forward only [v0,v1][v1,v2][v2,v0]
     # However we could probably build any tuples required on the fly like (v, adj[v][x]) where v is the first vert ID and x is the other vert ID from inside adj[v]
 
-# ~10x faster than a list comprehension when numba gets its hands on it
+# This is ~10x faster than a list comprehension when numba gets its hands on it
 @njit(cache=True)
 def next_vert(v, arr1, arr2):
     for i in arr1:
