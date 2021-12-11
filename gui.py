@@ -59,7 +59,7 @@ def visualize(verts, tris, heights=None, scalars=None, zero_level=0.0, surf_poin
     tri_size = np.full((len(tris), 1), 3)
     new_tris = np.hstack((tri_size, tris))
     time_end = time.perf_counter()
-    print(f"Time to reshape triangle array: {time_end - time_start :.5f} sec")
+    print(f"  Time to reshape triangle array: {time_end - time_start :.5f} sec")
 
     tri_size = None
 
@@ -67,7 +67,7 @@ def visualize(verts, tris, heights=None, scalars=None, zero_level=0.0, surf_poin
     time_start = time.perf_counter()
     planet_mesh = pv.PolyData(verts, new_tris)
     time_end = time.perf_counter()
-    print(f"Time to create the PyVista planet mesh: {time_end - time_start :.5f} sec")
+    print(f"  Time to create the PyVista planet polydata: {time_end - time_start :.5f} sec")
 
     # Separate mesh for ocean water
     if show_ocean_shell:
@@ -94,12 +94,15 @@ def visualize(verts, tris, heights=None, scalars=None, zero_level=0.0, surf_poin
     # "Current"? ".items()"? https://stackoverflow.com/questions/3545331/how-can-i-get-dictionary-key-as-variable-directly-in-python-not-by-searching-fr
     # https://stackoverflow.com/questions/16819222/how-to-return-dictionary-keys-as-a-list-in-python
 
+    time_start = time.perf_counter()
     # pl.add_mesh(planet_mesh, show_edges=False, smooth_shading=True, color="white", below_color="blue", culling="back", scalars=scalars["scalars"], cmap=custom_cmap, scalar_bar_args=sargs, annotations=anno)
     pl.add_mesh(planet_mesh, show_edges=False, smooth_shading=True, color="white", culling="back", scalars=scalars["scalars"], cmap=color_map, scalar_bar_args=sargs, annotations=anno)
+    time_end = time.perf_counter()
+    print(f"  Time to add the PyVista planet mesh to the plotter: {time_end - time_start :.5f} sec")
 
     pl.show_axes()
     pl.enable_terrain_style(mouse_wheel_zooms=True)  # Use turntable style navigation
-    print("Sending to PyVista.")
+    print("Sending to PyVista...")
     pl.show()
 
 
