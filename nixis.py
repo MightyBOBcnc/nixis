@@ -129,10 +129,10 @@ def main():
     surface_points = defaultdict(list)
     test_latlon = False
 
-    do_erode = False
+    do_erode = True
     do_climate = False
 
-    snapshot_erosion = False
+    snapshot_erosion = True
     snapshot_climate = False
 
     args = parser.parse_args()
@@ -414,9 +414,10 @@ def main():
         # the mask and becomes part of the land points.
 
         erode_start = time.perf_counter()
-        erode_terrain2(points, neighbors, height, num_iter=20, snapshot=snapshot_erosion)  # ToDo: Placing the neighbors before the height probably violates my style guide.
-        average_terrain2(cells, height, num_iter=3)
-        # average_terrain_weighted(points, cells, height, num_iter=30)
+        average_terrain2(cells, height, num_iter=1)
+        erode_terrain5(points, neighbors, height, num_iter=200, snapshot=snapshot_erosion)  # ToDo: Placing the neighbors before the height probably violates my style guide.
+        # average_terrain2(cells, height, num_iter=3)
+        # average_terrain_weighted(points, cells, height, num_iter=30)  # No real benefit to this over a simple average as far as I can tell.
         erode_end = time.perf_counter()
         print(f"Erosion runtime: {erode_end-erode_start:.5f}")
 
