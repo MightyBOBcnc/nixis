@@ -108,11 +108,11 @@ def visualize(verts, tris, heights=None, scalars=None, zero_level=0.0, surf_poin
 
 def make_scalars(mode, scalars):
     # Define the colors we want to use (NOT BEING USED AT THE MOMENT)
-    blue = np.array([12/256, 238/256, 246/256, 1])
-    black = np.array([11/256, 11/256, 11/256, 1])
-    grey = np.array([189/256, 189/256, 189/256, 1])
-    yellow = np.array([255/256, 247/256, 0/256, 1])
-    red = np.array([1, 0, 0, 1])
+    # blue = np.array([12/256, 238/256, 246/256, 1])
+    # black = np.array([11/256, 11/256, 11/256, 1])
+    # grey = np.array([189/256, 189/256, 189/256, 1])
+    # yellow = np.array([255/256, 247/256, 0/256, 1])
+    # red = np.array([1, 0, 0, 1])
 
     minval = np.amin(scalars)
     maxval = np.amax(scalars)
