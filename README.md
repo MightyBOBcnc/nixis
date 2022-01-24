@@ -6,7 +6,7 @@ The structure is a mess and the files are full of enormous tracts of commented n
 </div>
 
 # Nixis
-A python program for procedurally generating planet-scale maps for spherical worlds.
+A python program for procedurally generating planet-scale maps for Earth-like, spherical worlds.
 
 ![](https://github.com/MightyBOBcnc/nixis/blob/main/docs/nixis_preview.jpg)
 
