@@ -62,7 +62,7 @@ After setting up your environment you can run `python nixis.py -h` or `python ni
 
 A smart workflow would be to generate a few planets with random seed numbers and a default number of divisions without exporting maps to quickly find a seed that you like, then increase the resolution and divisions with your chosen seed for a more detailed export. Higher levels of subdivision and larger images take longer to process.
 
-Erosion and solar insolation are both still in development you'll have to set some flags in `nixis.py` manually (after the section that sets up argparse): 
+Erosion and solar insolation are both still in development so you'll have to set some flags in `nixis.py` manually (after the section that sets up argparse): 
 ```
 do_erode = False
 do_climate = False
