@@ -6,7 +6,7 @@ The structure is a mess and the files are full of enormous tracts of commented n
 </div>
 
 # Nixis
-A python program for procedurally generating planet-scale maps for spherical worlds.
+A python program for procedurally generating planet-scale maps for Earth-like, spherical worlds.
 
 ![](https://github.com/MightyBOBcnc/nixis/blob/main/docs/nixis_preview.jpg)
 
@@ -61,6 +61,19 @@ Nixis is being developed in an [Anaconda environment](https://www.anaconda.com/)
 After setting up your environment you can run `python nixis.py -h` or `python nixis.py --help` for arguments. 
 
 A smart workflow would be to generate a few planets with random seed numbers and a default number of divisions without exporting maps to quickly find a seed that you like, then increase the resolution and divisions with your chosen seed for a more detailed export. Higher levels of subdivision and larger images take longer to process.
+
+Erosion and solar insolation are both still in development so you'll have to set some flags in `nixis.py` manually (after the section that sets up argparse): 
+```
+do_erode = False
+do_climate = False
+```
+Then tinker with the erosion and insolation references further down in `nixis.py` which you can find by searching for `if do_erode:` or `if do_climate:`, and optionally changing the color gradient used for visualization near the bottom of `nixis.py` by setting this line: 
+```python
+scalars = {"s-mode":"elevation", "scalars":height}
+```
+where `s-mode` choses which gradient to use and `scalars` defines which values to apply the gradient to.  See `def make_scalars` in `gui.py` for options (this is also a work in progress).  E.G. you might choose `"insolation"` as the gradient and `daily_insolation` as the scalars if do_climate is True, or `"temperature"` and `surface_temps`.
+
+NOTE: Erosion modifies the existing `height` array in place so setting the scalars to height will work regardless of if do_erode is False but setting the scalars to any of the temperature or insolation arrays will error if do_climate is False as they won't exist.
 
 -----
 ## options.json
