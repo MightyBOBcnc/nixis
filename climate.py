@@ -163,6 +163,7 @@ MAT_ALBEDO = {
 #       This same study notes that Earth could have become a steam house if the sun had been brighter. Which illustrates something about Nixis' assumptions: It doesn't simulate formation of the crust, or the formation of oceans, it just assumes they exist.
 #       https://www.space.com/19118-early-earth-atmosphere-faint-sun.html
 #       And the gas composition changes, too, particularly if life starts spewing oxygen, of course, which changes the greenhouse strength.
+# ToDo: "Vapor Pressure Deficit" seems like something that might be easy to approximate: https://phys.org/news/2021-11-increasingly-frequent-wildfires-linked-human-caused.html
 
 @njit(cache=True)
 def day2deg(year_length, day):
@@ -201,7 +202,10 @@ def calculate_seasonal_tilt(axial_tilt, degrees):
     return np.sin(degrees * np.pi/180) * axial_tilt
 
 def calculate_tsi(star_radius, star_temp, orbital_distance):
-    """Calculate the Total Solar Irradiance at the top of the atmosphere."""
+    """Calculate the Total Solar Irradiance at the top of the atmosphere.
+    star_radius -- in km
+    star_temp -- in kelvin
+    orbital_distance -- in km"""
     # Calculate the star's black-body radiation
     energy_at_sun = SBC * star_temp**4 * (4 * np.pi * star_radius**2)  # Energy at the star's surface
     energy_at_planet = energy_at_sun / (4 * np.pi * orbital_distance**2)  # Energy at the planet's orbit
@@ -209,7 +213,7 @@ def calculate_tsi(star_radius, star_temp, orbital_distance):
     # energy_at_planet is at the top of the atmosphere. For Earth that's about 1370 watts per meter squared (W/m^2)
     return energy_at_planet
 
-def calc_planet_equilibrium(flux, albedo):
+def calc_planet_equilibrium(flux, albedo, radius=1):
     """Calculate the equilibrium temperature for a whole planet."""
     tsi = flux
 
@@ -301,7 +305,12 @@ def calc_water_equilibrium(flux):
     # This is due to multiplying the time_step in the new amount of TSI to add to the joules.
     # It causes a large sum of joules to be added initially before new_emit is calculated and
     # subtracted in the subsequent step(s) if the step is large.
-    # Also, a large time_step can cause some of the variables to overflow because numbers get too big.
+    # Also, a large time_step can cause some of the variables to overflow because numbers get too big
+    # with both multiplication and division.
+    # There has to be a better way. IRL there are no time steps, it's continuous and always 'seconds' but
+    # the time_step causes big additions all at once in discreet 'chunks' that are not realistic; it's like
+    # suddenly dumping a huge amount of joules in at once, which massively increases the temperature, which
+    # immediately radiates away a large amount of energy in the next step which is a big giant fluctuation.
     old_temp = 1.0  # I'm scared to start at 0 kelvin so we'll start at 1
     old_joules = water_mass * water_heat_cap * old_temp# * time_step
     old_emit = SBC * old_temp**4 * surface_area * emissivity# * time_step
@@ -476,6 +485,7 @@ def brute_daily_insolation(verts, altitudes, radius, tilt, snapshot=False):  # T
             dictionary = {}
             rescaled_i = rescale(surface_temps, 0, 255)  #NOTE: Due to the relative nature of rescale, if the min or max insolation changes then the scale will be messed up.
             dictionary[f"{i+1:03d}"] = rescaled_i
+            # dictionary[f"{i+1:03d}"] = [ (surface_temps + 32768).astype('uint16'), 'gray']
 
             pixel_data = build_image_data(dictionary)
             save_image(pixel_data, cfg.SNAP_DIR, "insolation_snapshot")
@@ -589,7 +599,8 @@ def calc_yearly_insolation(points, height, radius, axial_tilt, snapshot=False):
         if snapshot:
             dictionary = {}
             rescaled_i = rescale(insolation, 0, 255)  #NOTE: Due to the relative nature of rescale, if the min or max insolation changes then the scale will be messed up.
-            dictionary[f"{x+1:03d}"] = rescaled_i
+            dictionary[f"{x+1:03d}"] = rescaled_i  # Could instead possibly just multiply the absolute value x10 or square it or something and use a 16-bit image instead of 8-bit.
+            # dictionary[f"{x+1:03d}"] = [ (insolation + 32768).astype('uint16'), 'gray']
 
             pixel_data = build_image_data(dictionary)
             save_image(pixel_data, cfg.SNAP_DIR, "day")
