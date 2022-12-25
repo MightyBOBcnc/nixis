@@ -13,13 +13,14 @@ A python program for procedurally generating planet-scale maps for Earth-like, s
 While there are many existing tools (such as [Gaea](https://quadspinner.com/), [TerreSculptor](http://www.demenzunmedia.com/home/terresculptor/), [World Machine](https://www.world-machine.com/), and [World Creator](https://www.world-creator.com/)) that can create plausibly realistic-looking terrain for small areas (a few kilometers squared) there are few to none that do so for a full-sized spherical planet.  In this instance "plausibly realistic-looking" refers to a terrain that incorporates principles of hydraulic erosion and weathering such that it resembles real terrain that has been acted upon by these natural forces over time.  Existing tools that apply erosion algorithms on small or flat terrains are not programmed to compensate for the distortion that is introduced by mapping a sphere onto a rectangular image.
 
 ## What This Project Is
-* The goal of this project is to use principles of hydraulic erosion and tectonic activity to create large-scale features like continents, mountain chain distributions, rivers, and water sheds that appear believable at planetary scales on a spherical planet. 
-* Given that the objective is planetary scales, the size of the smallest feature is not expected to be smaller than about one kilometer or a few kilometers per pixel.  See NASA's Visible Earth (Blue Marble) [topography](https://visibleearth.nasa.gov/images/73934/topography) and [bathymetry](https://visibleearth.nasa.gov/images/73963/bathymetry) maps for reference.
+* The goal of this project is to create a tool that will use principles of hydraulic erosion and tectonic activity to create large-scale features like continents, mountain chain distributions, rivers, and water sheds that appear believable at planetary scales on a spherical planet, and then export them as textures/maps. 
+* Given that the objective is planetary scales, the size of the smallest feature is not expected to be smaller than about one kilometer or a few kilometers per pixel.  See NASA's Visible Earth (Blue Marble) [topography](https://visibleearth.nasa.gov/images/73934/topography), [bathymetry](https://visibleearth.nasa.gov/images/73963/bathymetry), and [color](https://visibleearth.nasa.gov/images/74142/september-blue-marble-next-generation) maps for reference.
 * The output of the tool is saved as a series of [equirectangular texture maps](https://en.wikipedia.org/wiki/Equirectangular_projection) that can be used in 3D graphics applications such as Maya, Blender, Unreal Engine, Unity, etc. for video game graphics, visual effects, or animation. (Other map projections may be forthcoming at a later time that would be more useful for e.g. a D&D or other TTRPG campaign map; see roadmap below.)
 
 ## What This Project *Is Not*
-* A fully scientific planetary simulation is not the goal of this project.  Shortcuts and approximations are used for the sake of simplicity and performance.  As long as the output of the program looks *plausibly* realistic it need not be perfectly realistic or fully scientific for our purposes.
-* Nor is it a goal to be able to view a planet at resolutions from orbital altitudes to ground level.  This tool is not for creating playable maps for video games.  Its explicit goal is to create textures, that will wrap onto spheres for visualization, which do not have the resolution to be playable at ground level.  These textures are intended to be viewed from orbital distances. 
+* This is not a game. This will never be a game. This is a tool.
+* It is not a fully scientific planetary simulation is not the goal of this project.  Shortcuts and approximations are used for the sake of simplicity and performance.  As long as the output of the program looks *plausibly* realistic it need not be perfectly realistic or fully scientific for our purposes.
+* Nor is it a goal to be able to view a planet at resolutions from orbital altitudes to ground level (e.g. No Man's Sky).  This tool is not for creating playable maps for video games.  Its explicit goal is to create textures, that will wrap onto spheres for visualization, which do not have the resolution to be playable at ground level.  These textures are intended to be viewed from orbital distances.
 * Flat worlds, disc worlds, ring worlds, and terrains that wrap in both the X and Y direction need not apply.  There are many tools that can already cater to those styles.  Nixis is for spherical planets.
 
 ## Assumptions and Limitations
@@ -39,7 +40,7 @@ While there are many existing tools (such as [Gaea](https://quadspinner.com/), [
 * RGB image exports for land and ocean coloration.
 * Plate tectonics and hotspots.
 * Precipitation.
-* Climate and biome maps derived from temperature and precipitation.
+* Climate and biome maps (e.g. [Holdridge](https://en.wikipedia.org/wiki/Holdridge_life_zones), [Köppen](https://en.wikipedia.org/wiki/K%C3%B6ppen_climate_classification)/[Trewartha](https://en.wikipedia.org/wiki/Trewartha_climate_classification), and [hardiness](https://en.wikipedia.org/wiki/Hardiness_zone) zones).
 * Import an existing height map and run erosion/climate/biome calculations on it.
 * Vegetation growth.
 * Track soil fertility.
