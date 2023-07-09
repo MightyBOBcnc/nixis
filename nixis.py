@@ -95,17 +95,19 @@ def main():
     parser.add_argument("-n", "--name", type=str,
         help="World name (without file extension). If not specified then \
         a default name will be used.")
+    parser.add_argument("-s", "--seed", type=int,
+        help="A number used to seed the RNG. If not specified then a random \
+        number will be used.")
     parser.add_argument("-d", "--divisions", type=int, default=320,
         help="Number of divisions to add to the planet mesh. 320 will make a \
         mesh with ~2 million triangles. 2500 makes a 125mil triangle mesh. \
         Default is 320.")
-    parser.add_argument("-s", "--seed", type=int,
-        help="A number used to seed the RNG. If not specified then a random \
-        number will be used.")
     parser.add_argument("-r", "--radius", type=float,
         help="Planet radius in meters. Default is Earth's radius.")
     parser.add_argument("-t", "--tilt", type=float, default=0.0,
         help="Axial tilt of the planet, in degrees.")
+    parser.add_argument("-yl", "--year_length", type=int, default=365,
+        help="Length of the planet's year, in days.")
     # parser.add_argument("-lc", "--loadconfig", type=str,
     #     help="Load the generation settings from a text file. NOTE: Any other \
     #     provided arguments will override individual settings from the file.")
@@ -129,18 +131,38 @@ def main():
     surface_points = defaultdict(list)
     test_latlon = False
 
-    do_erode = True
+    do_erode = False
     do_climate = False
 
-    snapshot_erosion = True
+    snapshot_erosion = False
     snapshot_climate = False
 
     args = parser.parse_args()
 
+    # ToDo: If we ever need there to always be a vertex in the center of each of the original 20 triangles
+    # created by the original 12 vertices then ensuring that divisions is divisible by 6 will guarantee
+    # that there is a vertex in the center of each of those triangles.
+    # This might be useful if we need to know the longest possible distance between any two vertices on
+    # the world as that will be the location, although we'd need a KD Tree to find the vertex there
+    # unless we could reliably calculate the XYZ coordinates at that location and find the vertex
+    # in the points array that matches, which is dubious. Or if we could pick it from the points
+    # array based on insertion order from meshzoo.
+
+    # if args.divisions <= 0:
+    #     print("\n" + "Divisions must be an even, positive integer divisible by 6." + "\n")
+    #     sys.exit(0)
+    # if args.divisions % 6 != 0:
+    #     divisions = args.divisions
+    #     while divisions % 6 != 0:
+    #         divisions += 1
+    #     print(f"Divisions must be divisible by 6, please. Setting divisions to {divisions}.")
+    # else:
+    #     divisions = args.divisions
+
     if args.divisions <= 0:
         print("\n" + "Divisions must be an even, positive integer." + "\n")
         sys.exit(0)
-    if (args.divisions % 2) == 0:
+    if args.divisions % 2 == 0:
         divisions = args.divisions
     else:
         divisions = args.divisions + 1
@@ -148,7 +170,7 @@ def main():
     # ToDo: Let's try to estimate RAM usage based on what arguments have been passed (divisions, whether to export images, and climate/erosion flags) so we can add that to the warning.
     # https://www.thepythoncode.com/article/get-hardware-system-information-python
     if args.divisions > 2250:
-        print("\n" + "WARNING. Setting divisions to a large value can use gigabytes of RAM.")
+        print("\n" + "WARNING. Setting divisions to a large value can consume gigabytes of RAM.")
         print(f"         The 3D mesh will have {divisions * divisions * 10 + 2:,} vertices.")
         print(f"         The 3D mesh will have {divisions * divisions * 20:,} triangles.")
         print("         Simulation will also take proportionately longer." + "\n")
@@ -181,6 +203,8 @@ def main():
     else:
         print("\n" + "Axial tilt must be in the range -90 to +90." + "\n")
         sys.exit(0)
+
+    year_length = args.year_length
 
     world_albedo = 0.31  # Approximate albedo of Earth
     orbital_distance = 149597870.7  # 1 AU in km
@@ -223,6 +247,7 @@ def main():
         "axial_tilt": axial_tilt,
         "world_albedo": world_albedo,
         "orbital_distance": orbital_distance,
+        "year_length": year_length,
         "star_radius": star_radius,
         "star_temp": star_temp
     }
@@ -241,7 +266,7 @@ def main():
     print("\n" + f"Script started at: {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}" + "\n")
 
     # NOTE: For k=2500 the mesh takes 17 seconds to build. For k=5000 it takes 69 seconds. For k=7500 it takes 159 seconds.
-    # ToDo: Consider searching for a library or algorithm that is faster and possibly that can generate only the vertices without the triangles (unsure if that's feasible; at the very least you do need to edge pairs for subdividing)
+    # ToDo: Consider searching for a library or algorithm that is faster and possibly that can generate only the vertices without the triangles (unsure if that's feasible; at the very least you do need edge pairs for subdividing)
     # in order to save RAM and avoid unnecessary computation; also one that can be @njit decorated or that has a C/C++ binary with a python interface.
     # Or take a look at forking and stripping down the icosa_sphere function from meshzoo to only the parts that are needed and try @njit decoration again. (parts of it have optional arguments that are not needed)
     # (NOTE: meshzoo is GPL v3; so if I do a stripped fork it'd be wise to use a separate repo and have it be a dependency)
@@ -349,7 +374,7 @@ def main():
     ocean_level = find_percent_val(minval, maxval, ocean_percent)  # NOTE: Due to the way np.clip works (hack below), values less than 0% or greater than 100% have no effect.
     print("  Ocean Level:", ocean_level)
 
-    ocean = make_bool_elevation_mask(height, ocean_level)
+    ocean = make_bool_elevation_mask(height, ocean_level, mode="below")
 
     if args.save_img:
         export_list["ocean"] = [ocean, 'gray']
@@ -414,8 +439,8 @@ def main():
         # the mask and becomes part of the land points.
 
         erode_start = time.perf_counter()
-        average_terrain2(cells, height, num_iter=1)
-        erode_terrain5(points, neighbors, height, num_iter=200, snapshot=snapshot_erosion)  # ToDo: Placing the neighbors before the height probably violates my style guide.
+        # average_terrain2(cells, height, num_iter=1)
+        erode_terrain6(points, neighbors, height, num_iter=100, snapshot=snapshot_erosion)  # ToDo: Placing the neighbors before the height probably violates my style guide.
         # average_terrain2(cells, height, num_iter=3)
         # average_terrain_weighted(points, cells, height, num_iter=30)  # No real benefit to this over a simple average as far as I can tell.
         erode_end = time.perf_counter()
@@ -437,12 +462,12 @@ def main():
 # Climate Stuff
 # =============================================
     axial_tilt = 23.44
-    current_tilt = calculate_seasonal_tilt(axial_tilt, 36)
+    current_tilt = calc_seasonal_tilt(axial_tilt, 36)
 
     if do_climate:
 
         # Calculate the solar constant at the planet's orbit
-        tsi = calculate_tsi(star_radius, star_temp, orbital_distance)
+        tsi = calc_tsi(star_radius, star_temp, orbital_distance)
 
         # Calculate equilibrium temperature for the planet
         # calc_planet_equilibrium(tsi, world_albedo)
@@ -568,7 +593,7 @@ def main():
 
         print("Preparing visualization...")
         # The array that we want to use for the scalar bar.
-        scalars = {"s-mode":"temperature", "scalars":height}
+        scalars = {"s-mode":"elevation", "scalars":height}
         # Possible s-modes to control the gradient used by the scalar bar:
             # topography (solid color for ocean, colors for land)
             # bathymetry (colors for ocean height, solid color for land)

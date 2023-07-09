@@ -31,6 +31,10 @@ from util import *
 # Salinity of water bodies (salt lakes, mainly)
 # This page is unrelated to erosion but I do want to try the 'virtual pipe' method, and this page mentions that the flow rate through a pipe is the square of the diameter? But it also says that if you increase the pressure it's the square root of pressure?
 # http://homework.uoregon.edu/pub/class/es202/GRL/dwh.html
+# Track ground water movement?  I like that leather bee was attempting this.
+#   Useful info video, and mentions a resource for already computed values for different soil materials:
+#      https://www.youtube.com/watch?v=bG19b06NG_w
+#      Also this one has an equation: https://youtu.be/bY1E2IkvQ3k
 
 
 # https://www.archtoolbox.com/representation/geometry/slope.html
@@ -38,6 +42,10 @@ from util import *
 def calc_slope(v0, v1, dist):
     """Calculates slope as a percentage."""
     return (v1 - v0) / (dist + 0.00001)
+# ToDo: Instead of adding a tiny amount to dist to prevent div/0, maybe do a conditional check instead
+# and return a slope of 0 if there's no distance (or tiny distance) between the verts?
+# In fact, could this be one of the reasons why the sim seems unstable and produces ridiculous spikes?
+# i.e. dividing by a tiny decimal can make a large number (like, 5/0.0001 = 500,000)
 
 @njit(cache=True)
 def calc_slope_deg(v0, v1, dist):
@@ -267,6 +275,7 @@ def erosion_iteration3(verts, neighbors, r_buff, wat, sed):
                 # print("  Nbr slope:    ", slope)
 
                 # This is where any information about the layers of sediment/rock/etc and the hardness of the exposed layer will happen
+                # No inbuilt protection from exceeding the available water and sediment?  See erosion_iteration4
                 if slope > 0:  # Neighbor is higher than this vert
                     sed_amt += (solubility * wat[n])# * d  # NOTE: Parenthesis needed?
                     wat_amt += (wat[n] * d)  # NOTE: Parenthesis needed?
@@ -463,15 +472,17 @@ def erode_terrain5(nodes, neighbors, heights, num_iter=1, snapshot=False):
 # https://softologyblog.wordpress.com/2016/12/09/eroding-fractal-terrains-with-virtual-raindrops/
 
 @njit(cache=True)
-def find_lowest(vert, nbr, height):
-    """Return the index of the lowest neighbor or -1 if no lower neighbor."""
-    alts = [height[i] for i in nbr if i != -1]
+def find_lowest(vert, nbrs, height):
+    """Return the index of the lowest neighbor vertex or -1 if no lower neighbor.
+    vert -- The index of the current vertex.
+    nbrs -- The list of this vertex's 5 or 6 neighbor vertex indices.
+    height -- An array of heights indexed the same as the vertices."""
+    alts = [height[i] for i in nbrs if i != -1]
     lowest = min(alts)
 
     if lowest < height[vert]:
-        return nbr[find_first(lowest, alts)]
-    else:
-        return -1
+        return nbrs[find_first(lowest, alts)]
+    return -1
 
 @njit(cache=True, parallel=False, nogil=False)
 def erosion_iteration5(verts, neighbors, height_read, iteration):
@@ -487,6 +498,7 @@ def erosion_iteration5(verts, neighbors, height_read, iteration):
 
     for i in range(num_drops):
         drop_loc = drop_starts[i]
+        # drop_loc = i
         dest = find_lowest(drop_loc, neighbors[drop_loc], height_read)
         # print("Start loc:", drop_loc)
         # print("Next loc:", dest)
@@ -499,6 +511,8 @@ def erosion_iteration5(verts, neighbors, height_read, iteration):
             #     print(slope)
 
             pick_up = slope * erode_rate
+            # pick_up = height_read[drop_loc] / height_read[dest] * 0.5
+            # pick_up = (height_read[drop_loc] - height_read[dest]) * 0.25
             carried_soil += max(pick_up, 0)
 
             height_buffer[drop_loc] -= max(pick_up, 0)
@@ -508,6 +522,7 @@ def erosion_iteration5(verts, neighbors, height_read, iteration):
 
             # depo = max(pick_up * deposit_rate / slope, 0)  # Shouldn't this be the carried_soil, not the pick_up?
             depo = max(carried_soil * deposit_rate / slope, 0)
+            # depo = max(carried_soil * deposit_rate * slope, 0)
             height_buffer[drop_loc] += depo
             carried_soil -= max(depo, 0)
 
@@ -518,7 +533,7 @@ def erosion_iteration5(verts, neighbors, height_read, iteration):
 #            else:
 #                dest = -1
         # else:  # this else shouldn't be needed; we just un-indent the below line by 1 and let it run when the while loop exits
-        height_buffer[drop_loc] += carried_soil
+#        height_buffer[drop_loc] += carried_soil
 
 
     # Only write to the original height array at the end (stop race conditions)
@@ -527,8 +542,83 @@ def erosion_iteration5(verts, neighbors, height_read, iteration):
 
 # =========================
 
+@njit(cache=True)
+def erode_terrain6(nodes, neighbors, heights, num_iter=1, snapshot=False):
+    print("Starting terrain erosion...")
+    if num_iter <= 0:
+        num_iter = 1
+        print(" ERROR: Cannot have less than 1 iteration.")
+
+#    print("Input height object:", id(heights))
+
+    write_buffer = np.ones_like(heights, dtype=np.float64)
+
+#    print("Read buffer object: ", id(read_buffer))
+#    print("Write buffer object:", id(write_buffer))
+
+    for i in range(num_iter):
+        print("  Erosion pass:", i+1,"of", num_iter)
+        erosion_iteration6(nodes, neighbors, heights, write_buffer)
+        # Switch the read and write buffers
+        for x in prange(len(write_buffer)):
+            heights[x] = write_buffer[x]
+        # read_buffer = write_buffer
+        # write_buffer = read_buffer
+#        print("Read buffer object: ", id(read_buffer))
+#        print("Write buffer object:", id(write_buffer))
+
+    if len(neighbors) < 43:
+        print("New heights:")
+        print(write_buffer)
+
+# Idea inspired by Axel Paris' description of aggregating the influence of each neighbor, with a write buffer to avoid race conditions.
+# https://perso.liris.cnrs.fr/aparis/public_html/posts/terrain_erosion.html
+# https://perso.liris.cnrs.fr/aparis/public_html/posts/terrain_erosion_2.html
+
+@njit(cache=True, parallel=True, nogil=True)               # Only erode the current vertex based on its lowest neighbor.
+def erosion_iteration6(verts, neighbors, r_buff, w_buff):  # This produces weird pentagon rings around the 12 vertices with connectivity 5.
+    # simple_constant = 0.05
+    simple_constant = 0.0005
+
+    # For every vertex index
+    for i in prange(len(verts)):
+        # random.seed(i)  # This is suuuper slow
+        # Aggregate amount by which to change height
+        amt = 0
+
+        dest = find_lowest(i, neighbors[i], r_buff)
+
+        ##### Attempt 01
+        # if dest != -1:
+        #     # d = calc_distance(verts[i], verts[dest])
+        #     amt -= simple_constant * calc_distance(verts[i], verts[dest])# * random.random()
+        # w_buff[i] = r_buff[i] + amt
+
+        ##### Attempt 02
+        # if dest != -1:
+        #     # d = calc_distance(verts[i], verts[dest])
+        #     amt -= simple_constant * calc_distance(verts[i], verts[dest])# * random.random()
+        #     w_buff[i] = r_buff[i] + amt
+        # else:
+        #     w_buff[i] = r_buff[i]
+
+        ##### Attempt 03 flattens things out very fast but doesn't accidentally dig lower
+        if dest != -1:
+            # d = calc_distance(verts[i], verts[dest])
+            amt -= simple_constant * calc_distance(verts[i], verts[dest])# * random.random()
+            new = r_buff[i] + amt
+            if new < r_buff[dest]:
+                w_buff[i] = r_buff[i]
+            else:
+                w_buff[i] = new
+        else:
+            w_buff[i] = r_buff[i]
+
+
+# =========================
+
 # Triangle based erosion as opposed to vertex based erosion.
-def erode_terrain6(cells):
+def erode_terrain7(cells):
     print("Not implemented yet")
 
     # for c in cells:
@@ -562,10 +652,10 @@ def erode_terrain6(cells):
 #   artifacts seem effectively identical for the simple average method
 #   and the weighted average method. And really since we are averaging
 #   heights and not the actual vertex coordinates I don't think heights should
-#   even be able to cause such an issue so it would have to be somethign else.
+#   even be able to cause such an issue so it would have to be something else.
 #   It also continues to happen at twice the divisions (320 --> 640)
 #   and also doesn't appear to affect the exported height png so it has to be
-#   something to do with the mesh itself.
+#   something to do with the mesh itself like normal angle/smoothing.
 def average_terrain1(tris, height, num_iter=1, snapshot=False):
     """Average terrain heights in place."""
     print("Averaging terrain...")
@@ -690,9 +780,43 @@ def avg_terrain_weighted_iteration(verts, nbrs, dists, r_buff):
 
 # =========================
 
+# Fast Hydraulic Erosion Simulation and Visualization on GPU by Mei et al.
 def erode_via_pipes(verts, tris, height, num_iter=1, snapshot=False):
     print("Not implemented yet")
+    # Step 1: Add water
+
+    # Step 2: Flow water
+    # Inflow/Outflow flux calculation
+    # Update water volume/height
+    # Velocity field calculation
+
+    # Step 3: Erosion-deposition
+    # Dissolve some sediment
+    # Deposit some sediment
+
+    # Step 4: Transport sediment
+    # Move suspended sediment with the velocity field
+
+    # Step 5: Evaporation
+
 
 @njit(cache=True, parallel=True, nogil=True)
 def erode_via_pipes_iteration1(verts, nbrs, r_buff):
     print("Not implemented yet")
+
+
+# Based on Boris Shishov's implementation
+# https://github.com/bshishov/UnityTerrainErosionGPU
+# https://github.com/bshishov/UnityTerrainErosionGPU/blob/master/Assets/Shaders/Erosion.compute
+def erode_field2(verts, tris, height, num_iter=1, snapshot=False):
+    print("Not implemented yet")
+    # Step 1: Add water
+
+    # Step 2: Compute flux field
+
+    # Step 3: Apply flux
+
+    # Step 4: Erosion-deoposition
+    # Also evaporation
+
+    # Step 5: Transport sediment

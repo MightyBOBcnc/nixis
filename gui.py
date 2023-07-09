@@ -3,6 +3,7 @@
 import time
 import numpy as np
 import pyvista as pv
+import vtk
 from matplotlib.colors import LinearSegmentedColormap
 from util import latlon2xyz, find_percent_val, find_val_percent
 
@@ -12,7 +13,7 @@ import cmocean
 # zmaps = cmocean.cm.get_cmap("thermal").copy()
 
 def add_points(pl, points):
-    # Is it strictly necessary that these be np.arrays?
+    # ToDo: Is it strictly necessary that these be np.arrays?
     for key, data in points.items():
         dots = pv.PolyData(np.array(data))
         pl.add_mesh(dots, point_size=10.0, color=key)
@@ -43,6 +44,7 @@ def add_lines(pl, radius, tilt):
 def visualize(verts, tris, heights=None, scalars=None, zero_level=0.0, surf_points=None, radius=1.0, tilt=0.0):
     """Visualize the output."""
     pl = pv.Plotter()
+    pl.background_color = "#4c4c4cff"
 
 
     if scalars["s-mode"] in ("insolation", "temperature"):
@@ -62,10 +64,14 @@ def visualize(verts, tris, heights=None, scalars=None, zero_level=0.0, surf_poin
     print(f"  Time to reshape triangle array: {time_end - time_start :.5f} sec")
 
     tri_size = None
+    # tris = None
+    # ToDo: We could possibly just replace the tris array instead of making new_tris to save RAM,
+    # as long as we do nothing else with it after visualizing, which currently we do not.
 
     # Create pyvista mesh from our icosphere
     time_start = time.perf_counter()
-    planet_mesh = pv.PolyData(verts, new_tris)
+    # Setting n_faces allegedly speeds up the creation of PolyData
+    planet_mesh = pv.PolyData(verts, faces=new_tris, n_faces=len(new_tris))
     time_end = time.perf_counter()
     print(f"  Time to create the PyVista planet polydata: {time_end - time_start :.5f} sec")
 
@@ -87,7 +93,7 @@ def visualize(verts, tris, heights=None, scalars=None, zero_level=0.0, surf_poin
 
     # Prepare scalar gradient, scalar bar, and annotations
     color_map, anno = make_scalars(scalars["s-mode"], scalars["scalars"])
-    sargs = dict(n_labels=0, label_font_size=12, position_y=0.07)
+    sargs = dict(n_labels=0, label_font_size=12, position_y=0.07, color="white")
 
     # ToDo: Add title to the scalar bar sargs and dynamically change it based on what is being visualized (e.g. Elevation, Surface Temperature, etc.)
     # title="whatever" (remove the quotes and make 'whatever' into a variable, like the s-mode or whatever. like title=scalars["s-mode"])
@@ -100,8 +106,11 @@ def visualize(verts, tris, heights=None, scalars=None, zero_level=0.0, surf_poin
     time_end = time.perf_counter()
     print(f"  Time to add the PyVista planet mesh to the plotter: {time_end - time_start :.5f} sec")
 
-    pl.show_axes()
+    pl.add_axes(color="white")
     pl.enable_terrain_style(mouse_wheel_zooms=True)  # Use turntable style navigation
+    # Suppress vtk warnings when looking straight up or down (two options, either method works)
+    # vtk.vtkLogger.SetStderrVerbosity(vtk.vtkLogger.VERBOSITY_OFF)
+    vtk.vtkObject.GlobalWarningDisplayOff()
     print("Sending to PyVista...")
     pl.show()
 
@@ -147,6 +156,7 @@ def make_scalars(mode, scalars):
         # anno = {minval:f"{minval:.2}", zero_level:"0.00", maxval:f"{maxval:.2}"}
         anno = {minval:f"{minval:.2}", find_percent_val(minval, maxval, nearshore*100):"0.00", maxval:f"{maxval:.2}"}
     else:
+        # ToDo: Better error handling.
         print("NO VALID SCALAR MODE SPECIFIED")
 
     return color_map, anno

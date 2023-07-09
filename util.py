@@ -88,12 +88,12 @@ def latlon2xyz(lat, lon, r):
     return (x, y, z)
 
 @njit(cache=True)
-def kelvin_to_c(k):
+def k_to_c(k):
     """Convert temperature from Kelvin to Celsius."""
     return k - 273.15
 
 @njit(cache=True)
-def c_to_kelvin(c):
+def c_to_k(c):
     """Convert temperature from Celsius to Kelvin."""
     return c + 273.15
 
@@ -128,6 +128,9 @@ def rescale(x, lower, upper, mid=None, mode=None, u_min=None, u_max=None):
     mode -- Optionally rescale ONLY the 'lower' or 'upper' values.
     u_min -- Optionally specify an absolute value for x min.
     u_max -- Optionally specify an absolute value for x max.
+    (u_min and u_max are useful for snapshotting when you're processing several
+    arrays with different ranges and need them to retain their relationship to
+    each other within the new lower and upper bounds.)
     """
     new_array = np.copy(x)  # NOTE: Rescale doesn't work safely on certain numpy dtypes, like a simple black and white mask that has a dtype of bool_ or something simple like int8 because their precision is too small.
     # new_array = x.astype(np.float64)
@@ -410,6 +413,7 @@ def build_image_data(colors=None):  # Could rename this to like make_image_data 
             pass
         else:  # Fallback for unexpected dtypes
             colors[key] = [rescale(array, 0, 255), mode]  # ToDo: Will pillow be okay?  We're not doing an .astype to change the dtype here.
+            # colors[key] = [rescale(array.astype(np.float64), 0, 255), mode]  # Testing how this handles a float64 because numba cries
 
     for key, container in colors.items():
         array = container[0]
@@ -583,7 +587,7 @@ def find_val_percent(minval, maxval, x):
     if not minval < x < maxval:
         print("\n" + "    ERROR: X must be between minval and maxval.")
         print("    Defaulting to 50 percent because why not Zoidberg. (\/)ಠ,,,ಠ(\/)" + "\n")
-    
+
     return (x - minval) / (maxval - minval) * 100
 
 # https://stackoverflow.com/questions/7632963/numpy-find-first-index-of-value-fast/29799815#29799815
@@ -597,6 +601,7 @@ def find_first(item, vec):
     return -1
 
 # ToDo: This is already pretty fast for k=2500 but maybe try prange later.
+# NOTE: prange may run into race condition with simultaneous find_first writes?
 @njit(cache=True)
 def build_adjacency(triangles):
     """Build an array of adjacencies for each mesh vertex."""
@@ -629,6 +634,17 @@ def build_adjacency(triangles):
     # e.g. The triangles [0,11,5] and [0,10,11] would produce [0-->11] and [11-->0] pairs when sliced forward only [v0,v1][v1,v2][v2,v0]
     # However we could probably build any tuples required on the fly like (v, adj[v][x]) where v is the first vert ID and x is the other vert ID from inside adj[v]
 
+# Takes only 4 seconds for a k=5000 mesh.
+@njit(cache=True, parallel=True, nogil=True)
+def build_tri_adjacency(triangles):
+    adj = np.full((int((len(triangles)+4)/2), 6), -1, dtype=np.int32)
+
+    for t in range(len(triangles)):
+        adj[triangles[t][0]][find_first(-1, adj[triangles[t][0]])] = t
+        adj[triangles[t][1]][find_first(-1, adj[triangles[t][1]])] = t
+        adj[triangles[t][2]][find_first(-1, adj[triangles[t][2]])] = t
+    return adj
+
 # This is ~10x faster than a list comprehension when numba gets its hands on it
 @njit(cache=True)
 def next_vert(v, arr1, arr2):
@@ -645,9 +661,14 @@ def next_vert(v, arr1, arr2):
 # ToDo: Try to search for patterns in the vert order again. Maybe there might
 # be something like the winding order for even indexes is one way and the
 # order for odd indexes is the other way (probably not, but worth checking).
+# NOTE: There might be a smarter way to use np.in1d or np.intersect1d
+# or numpy set intersection instead of some of these for loops and the
+# visited list and the next_vert function.. maybe..
+# https://stackoverflow.com/questions/27967914/efficient-way-to-compute-intersecting-values-between-two-numpy-arrays
+# Or it might already be as fast as it's going to get.
 @njit(cache=True, parallel=True, nogil=True)
 def sort_adjacency(adj):
-    for idx in prange(12):
+    for idx in prange(12):  # Prange for 12 verts is probably overkill.
         visited = np.full(6, -1, dtype=np.int32)
         pv = idx
         nv = adj[idx][0]
