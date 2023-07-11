@@ -56,7 +56,7 @@ While there are many existing tools (such as [Gaea](https://quadspinner.com/), [
 ## Installation and Use
 (Better instructions coming later.)
 
-Nixis is being developed in an [Anaconda environment](https://www.anaconda.com/) with Python >3.8.x (older versions have not been tested against but 3.10.x and 3.11.x are known to work). You can install the environment from `requirements.yaml`.
+Nixis is being developed in an [Anaconda environment](https://www.anaconda.com/) with Python >3.10.x (the oldest version tested against is 3.8.x). You can install the environment from `requirements.yaml`.
 
 After setting up your environment you can run `python nixis.py -h` or `python nixis.py --help` for arguments. 
 
