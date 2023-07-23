@@ -95,6 +95,7 @@ MAT_ALBEDO = {
 #       For the worldbuilders out there it would probably be helpful to give them a way to choose which day of the year is the first day.  Internally, I think Nixis will probably use an equinox as day 1 because that's the day with the easiest solar flux.
 # ToDo: And due to axial tilt, take a time of year as an input to modify values (summer temps are different from winter temps)
 #       The time of year should be set up that it can be any arbitrary amount of time, not a set number like 12, so that we can have planets with any orbital period, and cultures with arbitrary calendar increments (3 months, 60 weeks, 30 months, whatever)
+#       This is partially started with the day2deg and deg2day functions.
 # Examples:
 # Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec
 # -26 -38 -50 -53 -53 -55 -56 -55 -55 -47 -35 -25 South Pole average high in C
@@ -137,6 +138,9 @@ MAT_ALBEDO = {
 #   This might prove helpful, although it's for processing images: https://github.com/MightyBOBcnc/speculative-koppen Maybe it can be adapted to icosphere, and more than 2 months.
 #   https://en.wikipedia.org/wiki/Climate_classification and https://en.wikipedia.org/wiki/Biome
 #   worldengine might also have some useful code in whatever is the most up-to-date fork. https://github.com/MightyBOBcnc/worldengine
+#   It should be noted that some (if not all?) of these classification systems require knowing the average temperature and precipitation across multiple snapshots during the year so you can compare winter to summer.
+#   Therefore we'll need to store multiple arrays for each component, such as temp_Jan temp_Feb temp_Mar and precip_Jan precip_Feb etc.
+#   or it could be one array for each component with elements for each snapshot like temps = [[Jan, Feb, Mar], [Jan, Feb, Mar], [Jan, Feb, Mar]] (where each [Jan, Feb, Mar] is snapshots for each vertex)
 #
 # https://earthobservatory.nasa.gov/features/Water/page2.php
 #   "the total amount of water vapor in the atmosphere remains approximately the same over time.
@@ -155,8 +159,8 @@ MAT_ALBEDO = {
 # ToDo: In the future, possibly consider the effect of solar cycles (e.g. sun spots and flare activity) and how that changes the watts/M^2 insolation on the planet over time?
 # ToDo: Way the heck in the future maybe consider elliptical orbits.
 # ToDo: Even further in the future, maybe take a shot at planets that are tidally locked to their host star.
-# ToDo: For any calculation of the climate over time, consider that the brightness of a star changes over geologic time scales (e.g. our sun is 30% brighter than it was 4.5 billion years ago or like 3.3% every 500 million years).
-#       Also the orbital distance of a planet changes as well (the star radiates its own mass away and Earth is slowly drifting a few meters away every year?).
+# ToDo: For any calculation of the climate over time, consider that the brightness of a star changes over geologic time scales (e.g. our sun is 30% brighter today than it was 4.5 billion years ago or like 3.3% every 500 million years).
+#       Also the orbital distance of a planet changes as well (the star radiates its own mass away and Earth is slowly drifting a few meters away every year? The drifting away might be momentum/gravity related, not the mass change).
 #       https://www.nature.com/articles/s41586-021-03873-w
 #       https://www.space.com/venus-never-habitable-no-oceans
 #       "in the early days of the solar system, our star was just 70% as luminous as it is now."
@@ -164,6 +168,7 @@ MAT_ALBEDO = {
 #       https://www.space.com/19118-early-earth-atmosphere-faint-sun.html
 #       And the gas composition changes, too, particularly if life starts spewing oxygen, of course, which changes the greenhouse strength.
 # ToDo: "Vapor Pressure Deficit" seems like something that might be easy to approximate: https://phys.org/news/2021-11-increasingly-frequent-wildfires-linked-human-caused.html
+# ToDo: Glaciation causes sea level to drop as water gets locked up in ice.  And the reverse is true when glaciers melt.
 
 @njit(cache=True)
 def day2deg(year_length, day):

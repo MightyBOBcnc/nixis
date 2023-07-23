@@ -35,7 +35,7 @@ While there are many existing tools (such as [Gaea](https://quadspinner.com/), [
 
 ## Roadmap (in no particular order)
 ### Planned features:
-* Temperature driven by solar insolation (insolation has been implemented but needs to be converted into temperature).
+* Temperature driven by solar insolation (insolation has been partially implemented but needs to be converted into temperature).
 * Hydraulic erosion.
 * RGB image exports for land and ocean coloration.
 * Plate tectonics and hotspots.

@@ -413,7 +413,6 @@ def build_image_data(colors=None):  # Could rename this to like make_image_data 
             pass
         else:  # Fallback for unexpected dtypes
             colors[key] = [rescale(array, 0, 255), mode]  # ToDo: Will pillow be okay?  We're not doing an .astype to change the dtype here.
-            # colors[key] = [rescale(array.astype(np.float64), 0, 255), mode]  # Testing how this handles a float64 because numba cries
 
     for key, container in colors.items():
         array = container[0]

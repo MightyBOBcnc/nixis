@@ -53,6 +53,7 @@ from climate import *
 #    32 or 64 would be overkill for tracking 16 bits per channel, which is commonly stored as integer values, and covers a range of 0-65535, which matches the range of uint16; so 16-bits per channel would be 3 * 2 bytes * V
 #    https://petebankhead.gitbooks.io/imagej-intro/content/chapters/bit_depths/bit_depths.html
 #    There is also the option of floating point numbers which are used in HDR and such but that may be harder to work with and I'm not sure how much compatibility there is in common image editors (or in the Pillow library).
+#    (However, it would be nice if Nixis could optionally slot into a VFX pipeline so we should perhaps consider what data format would be desirable in that use case.)
 #    Another possibility is to use a palette, like a gif, instead of full RGB saved per vertex. The vertex would store a number between 0-255, for example, and that index would look up the real RGB values in a palette with 256 colors.
 #    A palette is something that will definitely be used for the simple map types like Biome, Climate, Metals, etc. because there are a limited number of biomes to choose from in a Whittaker diagram or Koppen climate classification.
 #
@@ -69,11 +70,13 @@ from climate import *
 #    https://www.reddit.com/r/learnpython/comments/ph9hp4/how_tiring_is_print_function_for_the_computer/ (useful tip: can use modulus to only record every X iterations, e.g. for i in range whatever, if i % 100 == 0: print(stuff))
 #    https://stackoverflow.com/questions/60077079/how-can-i-disable-numba-debug-logging-when-debug-env-variable-is-set
 # - Maybe some fancy progress bars. https://tqdm.github.io/
+# - Speculative future: A separate app or web GUI with sliders and text fields for a user to enter all the relevant values, and then the app calls nixis.py with all of the needed arguments.
+#    So the user doesn't have to type out all the args themselves.
 
 # Style guide:
 # - For functions that need mesh data like the vertices, the vertices should be the first parameter.
 # - If the function takes an array that is indexed to the vertices, such as height or temperature, that should be the second parameter.
-# -- If it also needs the triangle data, then the triangle array should come before the others.
+# -- If it also needs the triangle data, then the triangle array should come before the others. i.e. (verts, tris, other-arrays-indexed-to-verts)
 # - If it takes more than one array then those should be given in an order of importance that resembles the order in which they were created, such as height, then insolation, then temperature, then precipitation
 # - Functions that create new data should be prefixed with "make_" as part of their snake_case name--e.g. make_rgb_array, make_mesh, etc.--as this is shorter than "build_", "create_", etc..
 
