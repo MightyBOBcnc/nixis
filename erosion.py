@@ -335,7 +335,7 @@ def erode_terrain4(nodes, neighbors, heights, num_iter=1, snapshot=False):
         print("  Erosion pass:", i+1,"of", num_iter)
         rain_amount = 0.03 / 320# * random.random()
         water += rain_amount
-        erosion_iteration3(nodes, neighbors, heights, water, sediment)
+        erosion_iteration4(nodes, neighbors, heights, water, sediment)
 
 # Attempting Travis Archer's description of hydraulic erosion combined with the race condition fix described by Axel Paris.
 # Procedurally Generating Terrain - mics2011_submission_30.pdf
@@ -521,7 +521,7 @@ def erosion_iteration5(verts, neighbors, height_read, iteration):
             drop_loc = dest
 
             # depo = max(pick_up * deposit_rate / slope, 0)  # Shouldn't this be the carried_soil, not the pick_up?
-            depo = max(carried_soil * deposit_rate / slope, 0)
+            depo = max(carried_soil * deposit_rate / (1 / slope), 0)
             # depo = max(carried_soil * deposit_rate * slope, 0)
             height_buffer[drop_loc] += depo
             carried_soil -= max(depo, 0)
