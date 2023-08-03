@@ -116,7 +116,7 @@ def to_unsigned(x):
 # ToDo: Also NaN checks related to above.
 # ToDo: If "mid" is supplied, then rescale the upper and lower values separately. (rescale with two ranges, lower to mid, and mid to upper)
 # ToDo: Absolute value scaling support. E.G. If the supplied array is exactly 0 to 1, then each 0.00113019 would scale to approximately 10 meters if our absolute max is Mt Everest at 8848 meters.
-# Possible ToDo: A parameter called "inplace" that is either true or false (default false) that modifies the array in place when true.
+# Possible ToDo: A parameter called "inplace" that is either true or false (default false) that modifies the array in place when true. (Numba might barf on this as one kernel would return, and the other wouldn't)
 @njit(cache=True, parallel=True, nogil=True)
 def rescale(x, lower, upper, mid=None, mode=None, u_min=None, u_max=None):
     """Re-scale (normalize) an array to a given lower and upper bound.
@@ -267,6 +267,7 @@ def power_rescale(x, mask=None, mode=None, power=1.0):
     return new_array
 
 
+# NOTE: Unused.
 def make_ranges(arr_len, threads):
     """Make number ranges for threading from a given length.
     arr_len -- Integer. The length of the data to be split.
@@ -466,6 +467,27 @@ def save_image(data, path, name):
         # img = Image.fromarray(array[:,:,0])  # If an array is RGB (if each pixel has 3 values) this will slice it to only have 1 value, i.e. grayscale, which pillow CAN do.  (Will work for uint16 and uint8 grayscale)
         img = Image.fromarray(array)
         img.save(out_path)
+
+
+# TODO: This can be quite slow, and will need expanding to support RGB in the future.
+# TODO: Also relative vs absolute scaling, e.g. the commented out line that makes use of u_min and u_max
+def save_snapshot(arr: np.ndarray, step: int) -> None:
+    """Save an image snapshot of the current iteration of some process.
+    arr -- A 1d(?) numpy array indexed to the mesh's vertices.
+    step -- An integer of the current iteration step (used as name suffix)"""
+    dictionary = {}
+    # rescaled_h = rescale(arr, 0, 255)  #NOTE: Due to the relative nature of rescale, if the min or max height changes then the scale will be messed up.
+    # dictionary[f"{step+1:03d}"] = rescaled_h
+    # Add 32768 to lift sea level (0 meters) to the middle of the 16-bit range.
+#    dictionary[f"{step+1:03d}"] = [ (arr + 32768).astype('uint16'), 'gray']
+
+    # A u_min of 28768 and a u_max of 41618 correspond to a minimum elevation of -4000 and a max of 8850
+    # when you add 32768 to them when you lift sea level to the middle of the 16-bit range.
+    dictionary[f"{step+1:03d}"] = [ ( rescale(arr + 32768, lower=0, upper=65535, u_min=28768, u_max=41618) ).astype('uint16'), 'gray']
+
+    pixel_data = build_image_data(dictionary)
+    save_image(pixel_data, cfg.SNAP_DIR, cfg.WORLD_CONFIG["world_name"] + "_erosion_snapshot")
+
 
 # ToDo: Validate that we can import 16-bit data and keep it that way instead of converting to 8-bit
 # Read an image into an array

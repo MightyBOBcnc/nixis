@@ -343,8 +343,8 @@ def main():
 
     # min_alt = -0.05
     # max_alt = 0.15
-    min_alt = -4000
-    max_alt = 8850
+    min_alt = -4000  # Somewhat arbitrary choice for deepest ocean floor
+    max_alt = 8850  # Arbitrary choice of Mt. Everest's height for highest peak
     # Ocean percent is a *relative* percent of the range from min to max altitude.
     ocean_percent = 55.0
     n_init_rough = 1.5     # Initial roughness of first octave
@@ -438,7 +438,7 @@ def main():
         # ToDo: Should probably have an ocean clip mask that I can pass through for
         # verts that should be ignored during erosion, although if land borders
         # ocean then it should be able to add to the ocean floor to some degree
-        # until uplifts above the ocean level, at which point it is removed from
+        # until it uplifts above the ocean level, at which point it is removed from
         # the mask and becomes part of the land points.
 
         erode_start = time.perf_counter()

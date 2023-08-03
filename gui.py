@@ -148,6 +148,8 @@ def make_scalars(mode, scalars):
         print("cmap transition upper:", shore)
 
         color_map = LinearSegmentedColormap.from_list('ocean_and_topo', [(0, [0.1,0.2,0.6]), (nearshore, [0.8,0.8,0.65]), (shore, [0.3,0.4,0.0]), (1, [1,1,1])])
+        # ToDo: Investigate PyVista's LookupTable: https://docs.pyvista.org/version/stable/api/plotting/_autosummary/pyvista.LookupTable.html
+        # I'd like to ditch matplotlib as a dependency if possible.
 
         # https://matplotlib.org/cmocean/
         # https://docs.pyvista.org/examples/02-plot/cmap.html

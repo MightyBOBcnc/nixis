@@ -444,32 +444,30 @@ def erosion_iteration4(verts, neighbors, r_buff, wat, sed):
 
 # =========================
 
-#@njit(cache=True)
+# Attempting Jason Rampe's method.
+# https://softologyblog.wordpress.com/2016/12/09/eroding-fractal-terrains-with-virtual-raindrops/
+
 def erode_terrain5(nodes, neighbors, heights, num_iter=1, snapshot=False):
     print("Starting terrain erosion...")
     if num_iter <= 0:
         num_iter = 1
         print(" ERROR: Cannot have less than 1 iteration.")
 
-    if snapshot:
-        print("Starting height min is", np.min(heights), "and starting height max is", np.max(heights))
+    write_buff = np.copy(heights)
+
+    # if snapshot:
+    #     print("Starting height min is", np.min(heights), "and starting height max is", np.max(heights))
 
     for i in range(num_iter):
         print("  Erosion pass:", i+1,"of", num_iter)
-        erosion_iteration5(nodes, neighbors, heights, i)
+        # print("  Height object:", id(heights))
+        # print("  Write object:", id(write_buff))
+        erosion_iteration5(nodes, neighbors, heights, write_buff, i)
 
-        if snapshot:  #ToDo: This is quite slow.
-            dictionary = {}
-            # rescaled_h = rescale(heights, 0, 255)  #NOTE: Due to the relative nature of rescale, if the min or max height changes then the scale will be messed up.
-            # dictionary[f"{i+1:03d}"] = rescaled_h
-            print("Height min is", np.min(heights), "and height max is", np.max(heights))
-            dictionary[f"{i+1:03d}"] = [ ( rescale(heights + 32768, 0, 65535, u_min=28768, u_max=41618) ).astype('uint16'), 'gray']
+        if snapshot:
+            # print("Height min is", np.min(heights), "and height max is", np.max(heights))
+            save_snapshot(heights, i)
 
-            pixel_data = build_image_data(dictionary)
-            save_image(pixel_data, cfg.SNAP_DIR, cfg.WORLD_CONFIG["world_name"] + "_erosion_snapshot")
-
-# Attempting Jason Rampe's method.
-# https://softologyblog.wordpress.com/2016/12/09/eroding-fractal-terrains-with-virtual-raindrops/
 
 @njit(cache=True)
 def find_lowest(vert, nbrs, height):
@@ -484,18 +482,25 @@ def find_lowest(vert, nbrs, height):
         return nbrs[find_first(lowest, alts)]
     return -1
 
+# This is super slow because the water drops run sequentially one at a time, not in parallel.
+# Otherwise they would collide when changing heights (aka a race condition in the write_buffer).
+# It does produce some interesting results, but they are highly subdivision-dependant.
 @njit(cache=True, parallel=False, nogil=False)
-def erosion_iteration5(verts, neighbors, height_read, iteration):
-    height_buffer = np.copy(height_read)
-
+def erosion_iteration5(verts, neighbors, height_read, write_buffer, iteration):
     num_drops = len(verts)# * 2
 #    num_drops = 1
     erode_rate = 1.0001
+    # Maybe deposit_rate actually should be <1 ?  We should be depositing less than we are eroding
+    # (yes, we intentionally lose soil mass by discarding carried_soil when the while loop terminates without depositing everything left in carried_soil)
     deposit_rate = 1.0001
 
+    # Pseudo-random list of locations where we'll spawn drops.
     np.random.seed(iteration)
     drop_starts = np.random.randint(0, len(verts), size=num_drops)
 
+    # This loop can be run with prange but will make slightly different (aka non-deterministic)
+    # outputs due to collisions when modifying the write_buffer.  Don't forget to set the
+    # parallel=True parameter in the @njit decorator if you change this to prange
     for i in range(num_drops):
         drop_loc = drop_starts[i]
         # drop_loc = i
@@ -504,27 +509,45 @@ def erosion_iteration5(verts, neighbors, height_read, iteration):
         # print("Next loc:", dest)
         carried_soil = 0.0
 
+        # TODO: I am not sure if this is a problem but it is worth noting (everything seems to work fine despite this observation):
+        # When we find 'dest' and when we calc the 'slope' both above and inside the while loop we are using the read buffer (height_read).
+        # However, the while loop makes changes to the write buffer and then *goes back to reading from the read buffer* on its next loop
+        # but now the read buffer values are *outdated* because the water drop changed some things in the previous loop and these haven't been propagated
+        # back into the read buffer.  So it's like it's following ghost terrain for the next drops that pass through any modified vertex.
+        # Then eventually when the while loop terminates for having no lower destination we continue with the outer loop and start a new water drop but
+        # we *still* are only doing reads from the read buffer so each drop that runs is running on an increasingly outdated set of information that
+        # is more and more divergent from what's happening in the write buffer.
+        # Only when we finally run out of drops do we actually copy all the changes from the write buffer back into the read buffer, and then the outer
+        # function moves on to its next loop and calls this function again.
+        #
+        # Because this drop based function is different from all the other erosion functions (in that it only ever runs one drop at a time) should we
+        # actually read from and write to the same array?  There can't be a race condition because nothing runs in parallel.
+        # That would make for a problem if we try to get drops running in parallel in the future, but we'll have to change the structure then anyway so, meh.
+
         while dest != -1:
             d = calc_distance(verts[drop_loc], verts[dest])
+            # TODO: Slope has essentially no meaning at large scales and is only meaningful for local erosion, not global erosion,
+            # so its use here (or anywhere in Nixis) is technically wrong. Something to consider for further work.
             slope = calc_slope_deg(height_read[dest], height_read[drop_loc], d)
             # if i < 5:
             #     print(slope)
 
+            # Slope on these global scales is usually <1, like 0.15, so this would be 0.15*1.0001 = 0.150015 picked up
             pick_up = slope * erode_rate
             # pick_up = height_read[drop_loc] / height_read[dest] * 0.5
             # pick_up = (height_read[drop_loc] - height_read[dest]) * 0.25
-            carried_soil += max(pick_up, 0)
+            carried_soil += max(pick_up, 0)  # Add picked up soil to carried_soil
 
-            height_buffer[drop_loc] -= max(pick_up, 0)
+            write_buffer[drop_loc] -= max(pick_up, 0)  # Remove same amount from current location
 
 #            prev_loc = drop_loc
-            drop_loc = dest
+            drop_loc = dest  # Move water drop
 
-            # depo = max(pick_up * deposit_rate / slope, 0)  # Shouldn't this be the carried_soil, not the pick_up?
+            # Should really be checking the height delta between source and dest so we can't deposit more than half(?) that delta
             depo = max(carried_soil * deposit_rate / (1 / slope), 0)
             # depo = max(carried_soil * deposit_rate * slope, 0)
-            height_buffer[drop_loc] += depo
-            carried_soil -= max(depo, 0)
+            write_buffer[drop_loc] += depo  # Deposit part of the carried soil at the new location
+            carried_soil -= max(depo, 0)  # Remove same amount from carried soil
 
             dest = find_lowest(drop_loc, neighbors[drop_loc], height_read)
             # print("Next loc:", dest)
@@ -533,39 +556,99 @@ def erosion_iteration5(verts, neighbors, height_read, iteration):
 #            else:
 #                dest = -1
         # else:  # this else shouldn't be needed; we just un-indent the below line by 1 and let it run when the while loop exits
-#        height_buffer[drop_loc] += carried_soil
+#        write_buffer[drop_loc] += carried_soil  # Deposit any remaining carried soil.  Commented out because it might be depositing large amounts that are taller than the source they came from.
 
 
     # Only write to the original height array at the end (stop race conditions)
     for x in prange(len(height_read)):
-        height_read[x] = height_buffer[x]
+        height_read[x] = write_buffer[x]
+
+
+# =========================
+# Pseudocode ideas for running drops fully or at least partially in parallel without write collisions.
+# Idea 0:
+# Drops would deserve their own class, and each drop would have like drop.location, drop.destination, drop.carried_soil
+# And we spawn a set{} or something full of drops and update their self.whatever and the heights arrays when they move.
+# The hardest part might be making them play nice with numba.  It's also possible that instead of a class we just make an array or list of lists like [[64, 83, 0.12], [45, 859, 1.6]]
+# where each [list] is a drop, and the items inside are [location, destination, carried_soil] but then this has a problem of mixed types, unless we store location and destination as floats as well
+# and convert them to ints on the fly.
+# Importantly, if two drops have the same drop.location, we pick one to inherit the carried_soil from any others and then kill all others at that location.
+#
+# Idea 1:
+# First we would initialize the drops and their starting locations similar to how we initialize drop_starts now.
+# We don't need a separate array for drops; we can treat the index of the arrays as the ID for each drop.
+# drop_locs = np.array or list(?) that contains current vertex location for each drop  [vertex 12, vertex 54, vertex 2000, etc.]
+# dests = np.array or list(?) that contains the vertex destination for each drop, or -1; indexed the same as drop_locs
+# carried_soil = np.array or list(?) that contains a float of carried soil; indexed the same as drop_locs
+#
+# Second, find the destination for each drop in drop_locs
+# for i in prange(len(drop_locs)): # this part can be run in parallel because it's not changing anything
+#     dests[i] = find_lowest(drop_locs[i], neighbors[drop_locs[i]], heights)
+#
+# Third, find out how much soil should be removed from heights and put that in carried_soil.
+    # if dests[i] != -1:  # Is the pythonic way to say "if dests[i] is not -1"?  I'm not actually looking for math equality, I'm just using -1 as a symbol for 'no destination'
+    #     do math to find slope, pick_up, etc. for each drop that has a destination
+    #     add that amount to carried_soil[i] I think?
+# Fourth, now we actually subtract that from heights.  At this stage each vertex can still only have 1 drop so there should be
+# no possible race condition impeding us from subtracting from each height in parallel.
+# Also the carried_soil was initialized as 0.0 so it's safe to subtract 0 from a height,
+# OR we could indent this 1 more time and put it inside the previous if statement since those are the only heights that we will subtract from.
+#     heights[drop_locs[i]] -= carried_soil[drop_locs[i]]
+# Fifth, now comes the careful part.  We need to find any conflicts in dests; aka we need to deduplicate dests.
+# This might have to happen outside of the prange loop because now we're potentially in a many-to-one scenario where multiple drops have the same dest,
+# and we need to take the carried soil from multiple and put them all in the same carried_soil bucket.
+# [code???] Find any instance where a drop has the same destination as another drop.  A new list called duplicates? = [[1 , 2], [8, 20, 60]] ?  eugh, potentially different lengths
+# for drop in duplicates:
+#     carried_soil[duplicates[drop][0]] += carried_soil[duplicates[drop][1]] (or something)  # Take carried soil from any extras and give it to, say, simply the first drop in the list
+#     carried_soil[duplicates[drop][0]] += carried_soil[duplicates[drop][2]] etc..
+#     [duplicates[drop][1]] = 0
+#     [duplicates[drop][2]] = 0 etc..
+# Sixth, okay now we need to basically zero out the destination for any of the duplicates.
+# for i in duplicates:  # Depends on the structure of duplicates
+#     dests[i] = -1
+# Seventh, now we can finally move the water drops to their destinations, because now there will only be 1 drop moving to 1 destination so no race condition should be possible
+# for i in prange(len(drop_locs)):
+#     if dests[i] != -1:
+#         drop_locs[i] = dests[i]
+# Eighth, calcule deposit
+# Ninth, actually deposit and modify heights.  This should be safe because we previously culled any duplicates so it should be 1 deposit per drop location so this should be doable parallel
+# Tenth?  And finally the big question rears its head. Do we:
+# 1) run a check on dests to see if every value is -1 and break the loop (maybe like if np.amax(dests) > -1), OR
+# 2) pop/remove every -1 value in all 3 lists/arrays, thus changing their length, thus breaking the loop when they finally become empty?
+#
+# Idea 2:
+# Instead of a list or array that only contains active drops, make one that is the same len() as vertices, and track if each vertex has a drop or not.
+# So the whole thing would be initialized as [-1, -1, -1, -1, -1] etc. and then we initialize the drops so it would look like
+# [-1, -1, some_id, some_id, -1], but what is some_id?  That implies that there is another indexed list or array that actually contains the drops or something...
+# Maybe this is more related to idea 0 and some_id would actually be the drop object.  Idea 0 needs a step where it checks to see if a vert has more than 1 drop.
+#
+# if drops[i] already has a drop (like, drop[i] != -1?):
+#     take soil from current drop and give it to that drop
+#     then kill this drop
 
 # =========================
 
-@njit(cache=True)
 def erode_terrain6(nodes, neighbors, heights, num_iter=1, snapshot=False):
     print("Starting terrain erosion...")
     if num_iter <= 0:
         num_iter = 1
         print(" ERROR: Cannot have less than 1 iteration.")
 
-#    print("Input height object:", id(heights))
-
     write_buffer = np.ones_like(heights, dtype=np.float64)
-
-#    print("Read buffer object: ", id(read_buffer))
-#    print("Write buffer object:", id(write_buffer))
 
     for i in range(num_iter):
         print("  Erosion pass:", i+1,"of", num_iter)
         erosion_iteration6(nodes, neighbors, heights, write_buffer)
-        # Switch the read and write buffers
-        for x in prange(len(write_buffer)):
-            heights[x] = write_buffer[x]
-        # read_buffer = write_buffer
-        # write_buffer = read_buffer
-#        print("Read buffer object: ", id(read_buffer))
-#        print("Write buffer object:", id(write_buffer))
+        # Swap the read and write buffers
+        heights, write_buffer = write_buffer, heights
+#        for x in prange(len(write_buffer)):
+#            heights[x] = write_buffer[x]
+        if snapshot:
+            save_snapshot(heights, i)
+
+    # For odd number of iterations, ensure buffers get swapped back at the end
+    if num_iter % 2 != 0:
+        heights, write_buffer = write_buffer, heights
 
     if len(neighbors) < 43:
         print("New heights:")
@@ -588,6 +671,8 @@ def erosion_iteration6(verts, neighbors, r_buff, w_buff):  # This produces weird
 
         dest = find_lowest(i, neighbors[i], r_buff)
 
+        # NOTE: Something area based instead of distance based would be better.
+
         ##### Attempt 01
         # if dest != -1:
         #     # d = calc_distance(verts[i], verts[dest])
@@ -607,10 +692,10 @@ def erosion_iteration6(verts, neighbors, r_buff, w_buff):  # This produces weird
             # d = calc_distance(verts[i], verts[dest])
             amt -= simple_constant * calc_distance(verts[i], verts[dest])# * random.random()
             new = r_buff[i] + amt
-            if new < r_buff[dest]:
-                w_buff[i] = r_buff[i]
+            if new < r_buff[dest]:  # If new value is lower than lowest neighbor.
+                w_buff[i] = r_buff[i]  # Change nothing. Keep current vert at existing height. Current vert can't become lower than lowest neighbor.
             else:
-                w_buff[i] = new
+                w_buff[i] = new  # Lower the current vert.
         else:
             w_buff[i] = r_buff[i]
 
