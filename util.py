@@ -330,7 +330,7 @@ def make_rgb_array(width, height, dists, nbrs, colors):
     # if the return shape is different for an RGB/Gray array and because
     # Pillow doesn't understand MxNx1 shaped arrays.
     # debug_color = np.array([255,0,255], dtype=np.int32)
-    map_array = np.full((height, width, 3), 0, dtype=np.int32)
+    map_array = np.full((height, width, 3), 0, dtype=np.int32)  # Wait a sec, should this be a uint32?  Unless we switch to floating point image types there shouldn't be a need for negative values.
     # print(map_array)
     orig_dtype = colors.dtype
 

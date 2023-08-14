@@ -62,13 +62,14 @@ def sample_octaves(verts, elevations, perm, pgi, n_octaves=1, n_init_roughness=1
 def make_bool_elevation_mask(height, mask_elevation, mode):
     """Create a mask from an array of heights and a given elevation.
     height - Input heights.
-    mask_elevation - The desired elevation cutoff point.
+    mask_elevation - The desired elevation cutoff point. (Inclusive)
     mode - A string for whether you wish to create the mask for values "above" or "below" mask_elevation.
     """
     # NOTE: Some other functions may not like that a dtype of bool_ stores "True" or "False" instead of numbers.
     # Keep an eye on that. We can always switch to int8 or uint8 and store 0 or 1 if we need to.
     mask = np.zeros(len(height), dtype=np.bool_)
 
+    # NOTE: There's probably a more numpy-centric way to do this, like np.where()
     if mode == "below":
         for h in prange(len(height)):
             if height[h] <= mask_elevation:

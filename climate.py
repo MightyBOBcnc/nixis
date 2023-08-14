@@ -149,7 +149,8 @@ MAT_ALBEDO = {
 # ToDo: Not just rain, but frozen types of precipitation as well, and mixes (snow, sleet, etc.)
 # ToDo: Not just evaporation, not just transpiration from plants, but also sublimation in colder regions.
 # ToDo: When I start implementing plant growth and 'true color' maps, take into account that the pigment of the plants will likely respond to the spectrum and intensity of the star.
-#   Some worlds will have green plants, others red, some black, etc. I believe Shagomir's spreadsheet has useful info about stellar spectrum vs pigment color.
+#   Some worlds will have green plants, others red, some black, etc. https://www.reddit.com/r/worldbuilding/comments/1dui0v/plants_on_other_worlds_reference_chart/
+#   Additional reference for plant pigment color vs star spectrum: http://panoptesv.com/SciFi/ColorsOfAlienWorlds/AlienFields.php
 # ToDo: Eventually perhaps take volcanic emissions into account.  (Note: If this is done over time, remember that there's probably much more volcanism on a young planet.)
 # ToDo: Maybe an air quality index?  e.g. for tracking saharan-like dust storms, volcanoes, and forest fires?  lol, even pollen during spring.
 # ToDo: I'd like to be able to determine areas on the planet that are most likely to experience severe weather (I'm mainly interested in thunderstorms but hurricanes, monsoons, extreme winds, and blizzards are also okay to do).

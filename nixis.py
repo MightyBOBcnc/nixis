@@ -19,7 +19,8 @@ from climate import *
 # pylint: disable=not-an-iterable
 # pylint: disable=line-too-long
 
-# ToDo List:
+# TODO List:
+# - r/worldbuilding mega list of resources: https://docs.google.com/document/d/1TKoyrApuKeynNIh_hYUPXMXgFUaS3LJ3USLS0s9HrB0/
 # - In the future when we have climate simulation, run a test to see if it's faster to lookup xyz2latlon as-needed or to simply store latlon for each vertex in a big master array.
 #    NOTE: RAM considerations. Instead of storing it in RAM--and this is something applicable to all arrays--to limit RAM footprint it might be better to store most arrays on disk (such as in sqlite) and read values
 #    from disk only as-needed. However, this would depend on read/write speeds, which will vary drastically across user hardware from m.2 to 5400 RPM drives. Also I don't want to kill user drives with GBs of writes.
@@ -374,7 +375,7 @@ def main():
     print("  Rescaled min:", minval)
     print("  Rescaled max:", maxval)
 
-    ocean_level = find_percent_val(minval, maxval, ocean_percent)  # NOTE: Due to the way np.clip works (hack below), values less than 0% or greater than 100% have no effect.
+    ocean_level = find_percent_val(minval, maxval, ocean_percent)  # NOTE: If we ever want to use np.clip (see a few commented lines below), values less than 0% or greater than 100% have no effect.
     print("  Ocean Level:", ocean_level)
 
     ocean = make_bool_elevation_mask(height, ocean_level, mode="below")
@@ -388,7 +389,7 @@ def main():
     # Bring land down with a power > 1
     height = power_rescale(height, mask=ocean, mode=0 , power=2.0)
 
-#    height = np.clip(height, ocean_level, maxval)  # Hack for showing an ocean level in pyvista.  It might be time to try using a 2nd sphere mesh just for water, and use masks with the scalars or something so underwater areas don't bungle the height colormap.
+#    height = np.clip(height, ocean_level, maxval)  # Simple hack for showing an ocean level in pyvista.
     # Also this clipping should probably be one of the last steps before visualizing.
     # height = np.clip(height, minval, ocean_level)
 
@@ -410,6 +411,11 @@ def main():
     # It should be noted that the simple power function only works properly when values are between 0 and 1, otherwise values > 1 will shoot off into space or be smashed down.
     # So getting the terrain curves right is probably going to require multiple wacky rescale operations.
     # Continental shelves are probably going to need a power < 1 to raise them close to the land level, but ocean floor after the shelf will need a power > 1 to lower and flatten it with falloff from the shelf. Land needs a power > 1 to slope upward from coasts.
+    # https://en.wikipedia.org/wiki/Seafloor_depth_versus_age  MATH!
+    #   https://www.youtube.com/watch?v=LoVNwLT092A  Artifexian video explaining some ocean floor stuff.
+    #   https://docs.google.com/spreadsheets/d/1AML0mIQcWDrrEHj-InXoYsV_QlhlFVuUalE3o-TwQco/  Artifexian has a sheet you can make a copy of that includes a depth calculator.
+    # Side note: For planets with barely any water does it make sense to have a sea level based on water height?
+    #   E.G. Mars has no liquid water but scientists *did* give it a zero elevation, but it's based on other factors: https://en.wikipedia.org/wiki/Areography#Zero_elevation
 
 #    height *= world_radius  # Keeps the scale relative. NOTE: But don't multiply here, because that messes up the display of the scalar bar in pyvista. Instead, do this multiplication down inside the visualize function.
 
@@ -440,6 +446,11 @@ def main():
         # ocean then it should be able to add to the ocean floor to some degree
         # until it uplifts above the ocean level, at which point it is removed from
         # the mask and becomes part of the land points.
+        # Instead of a boolean mask perhaps we could go grayscale here so that there is a falloff.
+        # Thus we can have the erosion effect *partially* apply in shallow coastal waters where
+        # silt can be deposited and river channels can weakly dig down, but the deeper it gets
+        # the less this happens as the mask goes from 100% on land to 0% in the ocean.
+        # This falloff at the coast should be quite rapid.
 
         erode_start = time.perf_counter()
         # average_terrain2(cells, height, num_iter=1)

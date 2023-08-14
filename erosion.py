@@ -67,8 +67,6 @@ def erode_terrain1(nodes, neighbors, heights, num_iter=1, snapshot=False):
         num_iter = 1
         print(" ERROR: Cannot have less than 1 iteration.")
 
-    # read_buffer = heights.view(dtype=np.float64)  # Numba no like for some reason
-
 #    print("Input height object:", id(heights))
 
     read_buffer = heights
@@ -84,8 +82,6 @@ def erode_terrain1(nodes, neighbors, heights, num_iter=1, snapshot=False):
         if i < num_iter:                           # ToDo: This is a mess. Why does this line even exist?  Also read_buffer has no purpose.  Heights is the read buffer.  We only need the write_buffer to hold temp values.
             for x in prange(len(write_buffer)):    # Also we should be writing straight into heights. The layout of the function should be write_buffer = erosion_iteration to store the values for the iteration,
                 read_buffer[x] = write_buffer[x]   # and then heights[x] = write_buffer[x].  There doesn't even need to be a return value for the function.
-        # read_buffer = write_buffer
-        # write_buffer = read_buffer
 #        print("Read buffer object: ", id(read_buffer))
 #        print("Write buffer object:", id(write_buffer))
 
@@ -571,7 +567,8 @@ def erosion_iteration5(verts, neighbors, height_read, write_buffer, iteration):
 # And we spawn a set{} or something full of drops and update their self.whatever and the heights arrays when they move.
 # The hardest part might be making them play nice with numba.  It's also possible that instead of a class we just make an array or list of lists like [[64, 83, 0.12], [45, 859, 1.6]]
 # where each [list] is a drop, and the items inside are [location, destination, carried_soil] but then this has a problem of mixed types, unless we store location and destination as floats as well
-# and convert them to ints on the fly.
+# and convert them to ints on the fly.  Or we could do what the finance industry does and turn the floats for carried_soil into ints by multiplying them by 100 or 1000 (depending on how many decimals we want to save)
+# and then do the reverse when we want to turn them back into floats and use them.
 # Importantly, if two drops have the same drop.location, we pick one to inherit the carried_soil from any others and then kill all others at that location.
 #
 # Idea 1:
@@ -586,7 +583,7 @@ def erosion_iteration5(verts, neighbors, height_read, write_buffer, iteration):
 #     dests[i] = find_lowest(drop_locs[i], neighbors[drop_locs[i]], heights)
 #
 # Third, find out how much soil should be removed from heights and put that in carried_soil.
-    # if dests[i] != -1:  # Is the pythonic way to say "if dests[i] is not -1"?  I'm not actually looking for math equality, I'm just using -1 as a symbol for 'no destination'
+    # if dests[i] != -1:  # Is the pythonic way to say "if dests[i] is not -1"?  I'm not actually looking for math equality, I'm just using -1 as a symbol for 'no destination'. Python interns -1 so both are technically valid.
     #     do math to find slope, pick_up, etc. for each drop that has a destination
     #     add that amount to carried_soil[i] I think?
 # Fourth, now we actually subtract that from heights.  At this stage each vertex can still only have 1 drop so there should be
