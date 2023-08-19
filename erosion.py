@@ -39,61 +39,68 @@ from util import *
 
 # https://www.archtoolbox.com/representation/geometry/slope.html
 @njit(cache=True)
-def calc_slope(v0, v1, dist):
-    """Calculates slope as a percentage."""
-    return (v1 - v0) / (dist + 0.00001)
-# ToDo: Instead of adding a tiny amount to dist to prevent div/0, maybe do a conditional check instead
+def calc_slope(h0, h1, dist):
+    """Calculates slope as a percentage. (returns percent as a decimal)
+    h0 -- The height of the first vertex.
+    h1 -- The height of the second vertex.
+    dist -- The distance between the two vertices."""
+    return (h1 - h0) / (dist + 0.00001)
+# NOTE: Do we want our percentage as a decimal or full percentage?  We need to multiply by 100 to get a full percentage.  Currently returns as a decimal.
+# TODO: Instead of adding a tiny amount to dist to prevent div/0, maybe do a conditional check instead
 # and return a slope of 0 if there's no distance (or tiny distance) between the verts?
 # In fact, could this be one of the reasons why the sim seems unstable and produces ridiculous spikes?
 # i.e. dividing by a tiny decimal can make a large number (like, 5/0.0001 = 500,000)
 
 @njit(cache=True)
-def calc_slope_deg(v0, v1, dist):
-    """Calculates slope as degrees."""
-    return np.rad2deg(np.arctan( (v1 - v0) / (dist + 0.00001) ))
+def calc_slope_deg(h0, h1, dist):
+    """Calculates slope as degrees.
+    h0 -- The height of the first vertex.
+    h1 -- The height of the second vertex.
+    dist -- The distance between the two vertices."""
+    return np.rad2deg(np.arctan( (h1 - h0) / (dist + 0.00001) ))
 
 @njit(cache=True)
 def calc_distance(v0, v1):
     """Calculates distance between two XYZ coordinates.
     v0 -- The XYZ coordinates of the first vertex.
     v1 -- The XYZ coordinates of the second vertex.
-    v0 and v1 must both be iterable with 3 items each."""
+    v0 and v1 must both be an iterable with 3 items each."""
     return np.sqrt( (v0[0] - v1[0])**2 + (v0[1] - v1[1])**2 + (v0[2] - v1[2])**2 )
 
-@njit(cache=True)
+# Simple erosion test. Add or subtract a constant based on height of neighbor verts.
+# @njit(cache=True)
 def erode_terrain1(nodes, neighbors, heights, num_iter=1, snapshot=False):
     print("Starting terrain erosion...")
+    # TODO: Should probably raise an exception if num_iter is invalid.
+    # Yes we could 'gracefully' continue with a value of 1 but it's probably holistically better to stop.
     if num_iter <= 0:
         num_iter = 1
         print(" ERROR: Cannot have less than 1 iteration.")
 
-#    print("Input height object:", id(heights))
-
-    read_buffer = heights
     write_buffer = np.ones_like(heights, dtype=np.float64)
-
-#    print("Read buffer object: ", id(read_buffer))
-#    print("Write buffer object:", id(write_buffer))
 
     for i in range(num_iter):
         print("  Erosion pass:", i+1,"of", num_iter)
-        write_buffer = erosion_iteration1(neighbors, read_buffer, write_buffer)
+        erosion_iteration1(neighbors, heights, write_buffer)
         # Switch the read and write buffers
-        if i < num_iter:                           # ToDo: This is a mess. Why does this line even exist?  Also read_buffer has no purpose.  Heights is the read buffer.  We only need the write_buffer to hold temp values.
-            for x in prange(len(write_buffer)):    # Also we should be writing straight into heights. The layout of the function should be write_buffer = erosion_iteration to store the values for the iteration,
-                read_buffer[x] = write_buffer[x]   # and then heights[x] = write_buffer[x].  There doesn't even need to be a return value for the function.
-#        print("Read buffer object: ", id(read_buffer))
-#        print("Write buffer object:", id(write_buffer))
+        heights, write_buffer = write_buffer, heights
+
+        if snapshot:
+            save_snapshot(heights, i)
+
+    # For odd number of iterations, ensure buffers get swapped back at the end
+    # NOTE: Does this mean snapshots actually lag behind by 1 iteration?
+    if num_iter % 2 != 0:
+        heights, write_buffer = write_buffer, heights
 
     if len(neighbors) < 43:
         print("New heights:")
         print(write_buffer)
-    # Return new height values.. or return heights = write_buffer (handle height replacement in this func instead of outside because we won't be needing the unmodified heights anymore)
-    return read_buffer
+
 
 @njit(cache=True, parallel=True, nogil=True)
 def erosion_iteration1(neighbors, r_buff, w_buff):
-    simple_constant = 0.0005
+    simple_constant = 0.5
     # For every vertex index
     for i in prange(len(neighbors)):
         thisvert = r_buff[i]
@@ -114,46 +121,45 @@ def erosion_iteration1(neighbors, r_buff, w_buff):
         w_buff[i] = thisvert + amt
         # print("after:", w_buff[i])
 
-    return w_buff
 
 # =========================
 
-@njit(cache=True)
+# Idea inspired by Axel Paris' description of aggregating the influence of each neighbor, with a write buffer to avoid race conditions.
+# https://perso.liris.cnrs.fr/aparis/public_html/posts/terrain_erosion.html
+# https://perso.liris.cnrs.fr/aparis/public_html/posts/terrain_erosion_2.html
+
+# Simple erosion test. Add or subtract a constant based on slope to neighbor verts, modified by distance.
+# @njit(cache=True)
 def erode_terrain2(nodes, neighbors, heights, num_iter=1, snapshot=False):
     print("Starting terrain erosion...")
     if num_iter <= 0:
         num_iter = 1
         print(" ERROR: Cannot have less than 1 iteration.")
 
-#    print("Input height object:", id(heights))
-
     write_buffer = np.ones_like(heights, dtype=np.float64)
-
-#    print("Read buffer object: ", id(read_buffer))
-#    print("Write buffer object:", id(write_buffer))
 
     for i in range(num_iter):
         print("  Erosion pass:", i+1,"of", num_iter)
         erosion_iteration2(nodes, neighbors, heights, write_buffer)
         # Switch the read and write buffers
-        for x in prange(len(write_buffer)):
-            heights[x] = write_buffer[x]
-        # read_buffer = write_buffer
-        # write_buffer = read_buffer
-#        print("Read buffer object: ", id(read_buffer))
-#        print("Write buffer object:", id(write_buffer))
+        heights, write_buffer = write_buffer, heights
 
-    if len(neighbors) < 43:
+        if snapshot:
+            save_snapshot(heights, i)
+
+    # For odd number of iterations, ensure buffers get swapped back at the end
+    # NOTE: Does this mean snapshots actually lag behind by 1 iteration?
+    if num_iter % 2 != 0:
+        heights, write_buffer = write_buffer, heights
+
+    if len(nodes) < 43:
         print("New heights:")
         print(write_buffer)
 
-# Idea inspired by Axel Paris' description of aggregating the influence of each neighbor, with a write buffer to avoid race conditions.
-# https://perso.liris.cnrs.fr/aparis/public_html/posts/terrain_erosion.html
-# https://perso.liris.cnrs.fr/aparis/public_html/posts/terrain_erosion_2.html
 
-@njit(cache=True, parallel=True, nogil=True)                         # I think I accidentally implemented a crude thermal erosion instead of hydraulic erosion because this doesn't use or transport the water or sediment yet.
-def erosion_iteration2(verts, neighbors, r_buff, w_buff):  # However the erosion doesn't have a cutoff angle like talus slippage (talus slips only happen at steep slopes) so it's more akin to a gaussian blur.
-    simple_constant = 0.05                                           # I'm also seeing hex patterns emerge after more iterations. It's also kinda noisy. The terraces are cool, though. Maybe combine with average_terrain function.
+@njit(cache=True, parallel=True, nogil=True)
+def erosion_iteration2(verts, neighbors, r_buff, w_buff):  # I'm seeing hex patterns emerge after more iterations. It's also kinda noisy. The terraces are cool, though. Maybe combine with average_terrain function.
+    # simple_constant = 0.05
     simple_constant = 0.0005
     # A constant of 0.05 works fine when the world_radius is 1.0 and the elevation spread is -0.05 to +0.15
     # and a constant of 0.0005 works with a world_radius of 6378100.0 and an elevation spread of -4000 to +8850
@@ -202,6 +208,12 @@ def erosion_iteration2(verts, neighbors, r_buff, w_buff):  # However the erosion
 
 # =========================
 
+# Attempting Travis Archer's description of hydraulic erosion combined with the race condition fix described by Axel Paris.
+# Procedurally Generating Terrain - mics2011_submission_30.pdf
+
+# More complex erosion attempt using water with a carrying capacity, sediment, and evaporation.
+# NOTE: This is INCREDIBLY broken.
+# NOTE: Should really be validating water transport before adding evaporation, before adding sediment.
 # @njit(cache=True)
 def erode_terrain3(nodes, neighbors, heights, num_iter=1, snapshot=False):
     print("Starting terrain erosion...")
@@ -214,21 +226,13 @@ def erode_terrain3(nodes, neighbors, heights, num_iter=1, snapshot=False):
 
     for i in range(num_iter):
         print("  Erosion pass:", i+1,"of", num_iter)
-        rain_amount = 0.3 / 320# * random.random()  # This is only 0.09375 centimeters or 0.0009375 meters
-        water += rain_amount
+        rain_amount = 0.15# * random.random()  # Would like a psuedo-random amount of rain per loop.  0.15 meters is 6 inches.
+        water += rain_amount  # Would also like to distribute it according to climate but for now all verts get it equally
         erosion_iteration3(nodes, neighbors, heights, water, sediment)
 
-        if snapshot:  #ToDo: This is quite slow.
-            dictionary = {}
-            # rescaled_h = rescale(heights, 0, 255)  #NOTE: Due to the relative nature of rescale, if the min or max height changes then the scale will be messed up.
-            # dictionary[f"{i+1:03d}"] = rescaled_h
-            dictionary[f"{i+1:03d}"] = [ (heights + 32768).astype('uint16'), 'gray']
+        if snapshot:
+            save_snapshot(heights, i)
 
-            pixel_data = build_image_data(dictionary)
-            save_image(pixel_data, cfg.SNAP_DIR, "erosion_snapshot")
-
-# Attempting Travis Archer's description of hydraulic erosion combined with the race condition fix described by Axel Paris.
-# Procedurally Generating Terrain - mics2011_submission_30.pdf
 
 @njit(cache=True, parallel=True, nogil=True)
 def erosion_iteration3(verts, neighbors, r_buff, wat, sed):
@@ -236,24 +240,25 @@ def erosion_iteration3(verts, neighbors, r_buff, wat, sed):
     water_buffer = np.copy(wat)  # These and the parameters for the function really need better names.
     sed_buffer = np.copy(sed)  # Like explicitly name read and write like sed_read, sed_write.
 
-    simple_constant = 0.05
+    evaporation = 0.2# * random.random()
+    solubility = 0.02
+    capacity = 0.2
 
-    evaporation = 0.1 / 320# * random.random()
-    solubility = 0.01 / 320
-    capacity = 0.2 / 320
+    testvert = -1  # Set me to a valid vertex index to gain insight into what is happening with the math
 
     # For every vertex index
-    for i in prange(len(neighbors)):
+    for i in prange(len(verts)):
         thisvert = r_buff[i]
         # print("Before:", thisvert)
         # Aggregate amount by which to change height
         sed_amt = sed[i]
         wat_amt = wat[i]
 
-        # print(" === Vertex:   ", i)
-        # print("Start height:  ", thisvert)
-        # print("Start sediment:", sed_amt)
-        # print("Start water:   ", wat_amt)
+        if i == testvert:
+            # print("     Vertex:   ", i)
+            print(" Start height:  ", thisvert)
+            print(" Start sediment:", sed_amt)  # This is always 0.0?  Seems anomalous.
+            print(" Start water:   ", wat_amt)
 
         # Read neighbors
         for n in neighbors[i]:
@@ -263,7 +268,9 @@ def erosion_iteration3(verts, neighbors, r_buff, wat, sed):
                 # Note: d is using the UNMODIFIED vert positions from
                 # the smooth icosphere before any height modification
                 d = calc_distance(verts[i], verts[n])
+                delta = compvert - thisvert  # TODO: Reconcile that the slope functions subtract h1-h0 to get the rise but delta does the reverse here?
                 slope = calc_slope(thisvert, compvert, d)
+                # slope = calc_slope_deg(thisvert, compvert, d)
 
                 # print("  Neighbor vert:", n)
                 # print("  Nbr height:   ", compvert)
@@ -273,21 +280,22 @@ def erosion_iteration3(verts, neighbors, r_buff, wat, sed):
                 # This is where any information about the layers of sediment/rock/etc and the hardness of the exposed layer will happen
                 # No inbuilt protection from exceeding the available water and sediment?  See erosion_iteration4
                 if slope > 0:  # Neighbor is higher than this vert
-                    sed_amt += (solubility * wat[n])# * d  # NOTE: Parenthesis needed?
-                    wat_amt += (wat[n] * d)  # NOTE: Parenthesis needed?
-
-                    # print(" Adding", max(solubility * wat[n], 0), "to sed_amt")
-                    # print(" Adding", max(wat[n] * d, 0), "to wat_amt")
+                    sed_amt += solubility * wat[n]
+                    wat_amt += wat[n]
 
                 elif slope < 0:  # Neighbor is lower than this vert
-                    sed_amt -= (solubility * wat[n])# * d  # NOTE: Parenthesis needed?
-                    wat_amt -= (wat[n] * d)  # NOTE: Parenthesis needed?
+                    sed_amt -= solubility * wat[n]
+                    wat_amt -= wat[n]
 
-                    # print(" Subtracting", max(solubility * wat[n], 0), "from sed_amt")
-                    # print(" Subtracting", max(wat[n] * d, 0), "from wat_amt")
+                # else:
+                #     print("  Doing Nothing.")
 
-#                else:
-#                    print("  Doing Nothing.")  # This is problematic if the function is fed a height array that has a clipped ocean level because it will spam this print for all vertices in the ocean.
+                if i == testvert:
+                    # print(f"Distance between", i, "and", n, "is", d)  # Don't know why f-strings are giving me the float64 element type instead of its actual value..
+                    print(f" Delta between", i, "and", n, "is", delta)
+                    print(f" Slope between", i, "and", n, "is", slope)
+                    print(f" Vert {i} sed_amt:", sed_amt)
+                    print(f" Vert {i} wat_amt:", wat_amt)
 
 # Technically speaking we are not handling cases where the slope is == 0 because the height is the same.
 # It's also possible that for cases with very low slope (nearly the same height) we are adding or subtracting TOO much to sediment and water.  And water doesn't use a pressure model.
@@ -296,12 +304,20 @@ def erosion_iteration3(verts, neighbors, r_buff, wat, sed):
         # print(" sed_amt:", sed_amt)
         # print(" wat_amt:", wat_amt)
 
+        # HACK attempt to not exceed the delta between i and its neighbors.
+        # Should this actually be 12?  Delta/2 for each neighbor? (the correct place to do this is inside for n in neighbors[i]:)
+        sed_amt /= 6
+        wat_amt /= 6
+
         height_buffer[i] -= sed_amt
         sed_buffer[i] += sed_amt
-        water_buffer[i] += (wat_amt - wat_amt * evaporation)  # NOTE: Parenthesis needed?
+        water_buffer[i] += wat_amt - (wat_amt * evaporation)
+        if i == testvert:
+            print(" Adding", max(wat_amt - wat_amt * evaporation, 0), "to water_buffer")
+            print(f" water_buffer[{i}] is now", water_buffer[i])
         if sed_buffer[i] > (capacity * water_buffer[i]):
-            height_buffer[i] += (sed_buffer[i] - (capacity * water_buffer[i]))
-            sed_buffer[i] -= (sed_buffer[i] - (capacity * water_buffer[i]))
+            height_buffer[i] += sed_buffer[i] - (capacity * water_buffer[i])
+            sed_buffer[i] -= sed_buffer[i] - (capacity * water_buffer[i])
 
         # print("End height:  ", height_buffer[i])
         # print("End sediment:", sed_buffer[i])
@@ -317,6 +333,8 @@ def erosion_iteration3(verts, neighbors, r_buff, wat, sed):
 
 # =========================
 
+# Same style as erode_terrain3, but trying (and failing) to stop spikes with min and max caps and some other changes.
+# NOTE: This is INCREDIBLY broken.
 @njit(cache=True)
 def erode_terrain4(nodes, neighbors, heights, num_iter=1, snapshot=False):
     print("Starting terrain erosion...")
@@ -329,12 +347,10 @@ def erode_terrain4(nodes, neighbors, heights, num_iter=1, snapshot=False):
 
     for i in range(num_iter):
         print("  Erosion pass:", i+1,"of", num_iter)
-        rain_amount = 0.03 / 320# * random.random()
-        water += rain_amount
+        rain_amount = 0.15# * random.random()  # Would like a psuedo-random amount of rain per loop.  0.15 meters is 6 inches.
+        water += rain_amount  # Would also like to distribute it according to climate but for now all verts get it equally
         erosion_iteration4(nodes, neighbors, heights, water, sediment)
 
-# Attempting Travis Archer's description of hydraulic erosion combined with the race condition fix described by Axel Paris.
-# Procedurally Generating Terrain - mics2011_submission_30.pdf
 
 @njit(cache=True, parallel=True, nogil=True)
 def erosion_iteration4(verts, neighbors, r_buff, wat, sed):
@@ -348,30 +364,38 @@ def erosion_iteration4(verts, neighbors, r_buff, wat, sed):
     solubility = 0.0001 / 320
     capacity = 0.0002 / 320
 
+    testvert = -1  # Set me to a valid vertex index to gain insight into what is happening with the math
+
     # For every vertex index
-    for i in prange(len(neighbors)):
+    for i in prange(len(verts)):
         thisvert = r_buff[i]
         # print("Before:", thisvert)
         # Aggregate amount by which to change height
         sed_amt = sed[i]
         wat_amt = wat[i]
 
-        # print(" === Vertex:   ", i)
-        # print("Start height:  ", thisvert)
-        # print("Start sediment:", sed_amt)
-        # print("Start water:   ", wat_amt)
+        if i == testvert:
+            # print("     Vertex:   ", i)
+            print(" Start height:  ", thisvert)
+            print(" Start sediment:", sed_amt)  # This is always 0.0?  Seems anomalous.
+            print(" Start water:   ", wat_amt)
 
         # Read neighbors
         for n in neighbors[i]:
             if n != -1:
                 compvert = r_buff[n]
                 # Do math to determine if compvert is higher or lower than thisvert
-                # Note: d is using the UNMODIFIED vert positions from
+                # NOTE: d is using the UNMODIFIED vert positions from
                 # the smooth icosphere before any height modification
                 d = calc_distance(verts[i], verts[n])
-                slope = calc_slope(thisvert, compvert, d)  # NOTE: Perhaps instead, utilize the 'willgive', 'willreceive' method so slope is always positive,
-                                                           # and then allocate as needed, while multiplying with the slope instead of the distance below.
-                                                           # or keep the negative and positive slopes for identifying slope direction and just multiply by abs(slope) instead of distance.
+                delta = compvert - thisvert  # TODO: Reconcile that the slope functions subtract h1-h0 to get the rise but delta does the reverse here?
+                slope = calc_slope(thisvert, compvert, d)  
+        # NOTE: Perhaps instead, utilize the 'willgive', 'willreceive' method so slope is always positive,
+        # and then allocate as needed, while multiplying with the slope instead of the distance below.
+        # or keep the negative and positive slopes for identifying slope direction and just multiply by abs(slope) instead of distance.
+        # Allowing negative numbers definitely feels problematic, e.g. if there is more sediment or water flowing out of a vertex than flowing into it.
+        # Adding/subtracting/multiplying negative numbers is almost certainly screwing with the results. (e.g. evaporation multiplying by a negative number?)
+        # using abs() and handling addition/subtraction differently is probably a better idea.
 
                 # print("  Neighbor vert:", n)
                 # print("  Nbr height:   ", compvert)
@@ -380,21 +404,28 @@ def erosion_iteration4(verts, neighbors, r_buff, wat, sed):
 
                 # This is where any information about the layers of sediment/rock/etc and the hardness of the exposed layer will happen
                 if slope > 0:  # Neighbor is higher than this vert
-                    sed_amt += max(solubility * wat[n], 0)# * d  # NOTE: Parenthesis needed?
-                    wat_amt += max(wat[n] * d, 0)  # NOTE: Parenthesis needed?
+                    sed_amt += max(solubility * wat[n], 0)
+                    wat_amt += max(wat[n] * slope, 0)
 
                     # print(" Adding", max(solubility * wat[n], 0), "to sed_amt")
-                    # print(" Adding", max(wat[n] * d, 0), "to wat_amt")
+                    # print(" Adding", max(wat[n] * slope, 0), "to wat_amt")
 
                 elif slope < 0:  # Neighbor is lower than this vert
-                    sed_amt -= max(solubility * wat[n], 0)# * d  # NOTE: Parenthesis needed?
-                    wat_amt -= max(wat[n] * d, 0)  # NOTE: Parenthesis needed?
+                    sed_amt -= max(solubility * wat[n], 0)
+                    wat_amt -= max(wat[n] * slope, 0)
 
                     # print(" Subtracting", max(solubility * wat[n], 0), "from sed_amt")
-                    # print(" Subtracting", max(wat[n] * d, 0), "from wat_amt")
+                    # print(" Subtracting", max(wat[n] * slope, 0), "from wat_amt")
 
-                else:
-                    print("  Doing Nothing.")
+                # else:
+                #     print("  Doing Nothing.")
+
+                if i == testvert:
+                    # print(f"Distance between", i, "and", n, "is", d)  # Don't know why f-strings are giving me the float64 element type instead of its actual value..
+                    print(f" Delta between", i, "and", n, "is", delta)
+                    print(f" Slope between", i, "and", n, "is", slope)
+                    print(f" Vert {i} sed_amt:", sed_amt)
+                    print(f" Vert {i} wat_amt:", wat_amt)
 
 # Technically speaking we are not handling cases where the slope is == 0 because the height is the same.
 # It's also possible that for cases with very low slope (nearly the same height) we are adding or subtracting TOO much to sediment and water.  And water doesn't use a pressure model.
@@ -403,13 +434,21 @@ def erosion_iteration4(verts, neighbors, r_buff, wat, sed):
         # print(" sed_amt:", sed_amt)
         # print(" wat_amt:", wat_amt)
 
+        # HACK attempt to not exceed the delta between i and its neighbors.
+        # Should this actually be 12?  Delta/2 for each neighbor? (the correct place to do this is inside for n in neighbors[i]:)
+        sed_amt /= 6
+        wat_amt /= 6
+
         height_buffer[i] -= max(sed_amt, 0)
         sed_buffer[i] += max(sed_amt, 0)
-        water_buffer[i] += max((wat_amt - wat_amt * evaporation), 0)
-        # water_buffer[i] += max((wat_amt - evaporation), 0)
+        water_buffer[i] += max(wat_amt - (wat_amt * evaporation), 0)
+        # water_buffer[i] += max(wat_amt - evaporation, 0)
+        if i == testvert:
+            print(" Adding", max(wat_amt - wat_amt * evaporation, 0), "to water_buffer")
+            print(f" water_buffer[{i}] is now", water_buffer[i])
         if sed_buffer[i] > (capacity * water_buffer[i]):
-            height_buffer[i] += max((sed_buffer[i] - (capacity * water_buffer[i])), 0)
-            sed_buffer[i] -= max((sed_buffer[i] - (capacity * water_buffer[i])), 0)
+            height_buffer[i] += max(sed_buffer[i] - (capacity * water_buffer[i]), 0)
+            sed_buffer[i] -= max(sed_buffer[i] - (capacity * water_buffer[i]), 0)
 
         # print("End height:  ", height_buffer[i])
         # print("End sediment:", sed_buffer[i])
@@ -486,7 +525,7 @@ def erosion_iteration5(verts, neighbors, height_read, write_buffer, iteration):
     num_drops = len(verts)# * 2
 #    num_drops = 1
     erode_rate = 1.0001
-    # Maybe deposit_rate actually should be <1 ?  We should be depositing less than we are eroding
+    # Maybe deposit_rate actually should be <1 ?  We should be depositing less than we are eroding?
     # (yes, we intentionally lose soil mass by discarding carried_soil when the while loop terminates without depositing everything left in carried_soil)
     deposit_rate = 1.0001
 
@@ -494,7 +533,7 @@ def erosion_iteration5(verts, neighbors, height_read, write_buffer, iteration):
     np.random.seed(iteration)
     drop_starts = np.random.randint(0, len(verts), size=num_drops)
 
-    # This loop can be run with prange but will make slightly different (aka non-deterministic)
+    # NOTE: This loop can be run with prange but will make slightly different (aka non-deterministic)
     # outputs due to collisions when modifying the write_buffer.  Don't forget to set the
     # parallel=True parameter in the @njit decorator if you change this to prange
     for i in range(num_drops):
@@ -625,6 +664,9 @@ def erosion_iteration5(verts, neighbors, height_read, write_buffer, iteration):
 
 # =========================
 
+# Idea inspired by Axel Paris' description of aggregating the influence of each neighbor, with a write buffer to avoid race conditions.
+# https://perso.liris.cnrs.fr/aparis/public_html/posts/terrain_erosion.html
+# https://perso.liris.cnrs.fr/aparis/public_html/posts/terrain_erosion_2.html
 def erode_terrain6(nodes, neighbors, heights, num_iter=1, snapshot=False):
     print("Starting terrain erosion...")
     if num_iter <= 0:
@@ -637,13 +679,14 @@ def erode_terrain6(nodes, neighbors, heights, num_iter=1, snapshot=False):
         print("  Erosion pass:", i+1,"of", num_iter)
         erosion_iteration6(nodes, neighbors, heights, write_buffer)
         # Swap the read and write buffers
-        heights, write_buffer = write_buffer, heights
+        heights, write_buffer = write_buffer, heights  # NOTE: The reason this had no perf gain might be because we're doing "else: w_buff[i] = r_buff[i]" inside the iteration.
 #        for x in prange(len(write_buffer)):
 #            heights[x] = write_buffer[x]
         if snapshot:
             save_snapshot(heights, i)
 
     # For odd number of iterations, ensure buffers get swapped back at the end
+    # NOTE: Does this mean snapshots actually lag behind by 1 iteration?
     if num_iter % 2 != 0:
         heights, write_buffer = write_buffer, heights
 
@@ -651,9 +694,6 @@ def erode_terrain6(nodes, neighbors, heights, num_iter=1, snapshot=False):
         print("New heights:")
         print(write_buffer)
 
-# Idea inspired by Axel Paris' description of aggregating the influence of each neighbor, with a write buffer to avoid race conditions.
-# https://perso.liris.cnrs.fr/aparis/public_html/posts/terrain_erosion.html
-# https://perso.liris.cnrs.fr/aparis/public_html/posts/terrain_erosion_2.html
 
 @njit(cache=True, parallel=True, nogil=True)               # Only erode the current vertex based on its lowest neighbor.
 def erosion_iteration6(verts, neighbors, r_buff, w_buff):  # This produces weird pentagon rings around the 12 vertices with connectivity 5.
@@ -666,7 +706,7 @@ def erosion_iteration6(verts, neighbors, r_buff, w_buff):  # This produces weird
         # Aggregate amount by which to change height
         amt = 0
 
-        dest = find_lowest(i, neighbors[i], r_buff)
+        dest = find_lowest(i, neighbors[i], r_buff)  # Find lowest neighbor
 
         # NOTE: Something area based instead of distance based would be better.
 

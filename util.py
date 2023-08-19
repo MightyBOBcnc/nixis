@@ -168,7 +168,7 @@ def rescale(x, lower, upper, mid=None, mode=None, u_min=None, u_max=None):
         if mid is None:
             print("ERROR: Must supply a middle value to use rescale modes.")
             print("Continuing with unmodified data.")
-            # ToDo: Maybe raise an exception instead (actually I don't know if numba can handle that; the documentation says it can't do try/except, but it can do raise or assert)
+            # ToDo: Maybe raise an exception instead. Numba supports the following: https://numba.readthedocs.io/en/stable/reference/pysupported.html#exception-handling
             # sys.exit(0)
             return x
         elif mode == 'lower':
