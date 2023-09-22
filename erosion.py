@@ -7,7 +7,7 @@ from util import *
 # pylint: disable=not-an-iterable
 # pylint: disable=line-too-long
 
-# ToDo:
+# TODO:
 # Split erosion into functions by type.
 #   A function for hydraulic/fluvial erosion.  https://en.wikipedia.org/wiki/Fluvial_processes
 #     Shallow Water Simulation is another name to look up for papers. (A simplification of Navier Stokes equations?)
@@ -130,7 +130,7 @@ def erosion_iteration1(neighbors, r_buff, w_buff):
         # Read neighbors
         for n in neighbors[i]:
             if n != -1:
-                # compvert = r_buff[n]  # ToDo: Is it more performant to assign r_buff[n] to a var or to read it twice in the below comparison?
+                # compvert = r_buff[n]  # TODO: Is it more performant to assign r_buff[n] to a var or to read it twice in the below comparison?
                 # This is where any information about the layers of sediment/rock/etc and the hardness of the exposed layer will happen
                 # Do math to determine if compvert is higher or lower than thisvert
                 if r_buff[n] > thisvert:
@@ -198,7 +198,7 @@ def erosion_iteration2(verts, neighbors, r_buff, w_buff):  # I'm seeing hex patt
         for n in neighbors[i]:
             if n != -1:
                 compvert = r_buff[n]
-                # Note: d is using the UNMODIFIED vert positions from
+                # NOTE: d is using the UNMODIFIED vert positions from
                 # the smooth icosphere before any height modification
                 d = calc_distance(verts[i], verts[n])
                 slope = calc_slope_deg(thisvert, compvert, d)
@@ -207,7 +207,7 @@ def erosion_iteration2(verts, neighbors, r_buff, w_buff):  # I'm seeing hex patt
                 #     print(" Slope:   ", slope)
                 # This is where any information about the layers of sediment/rock/etc and the hardness of the exposed layer will happen
 
-                # ToDo: Problem: The radius of the planet, and the number of subdivisions are dynamic, which means that the distance between vertices and the slope are dynamic.
+                # TODO: Problem: The radius of the planet, and the number of subdivisions are dynamic, which means that the distance between vertices and the slope are dynamic.
                 # At the default radius (Earth) and subdivisions (320) the distance between vertices ranges from around 17000 to 26000 meters, which means the slope (in degrees)
                 # is only ever like +/- 0.18 degrees at the most extreme. Increasing the divisions to 5000 brings the distance between verts down to "only" 1100 meters at the low end
                 # but that leaves the slope as still a very small number. When the slope is very small that means there is effectively no thermal erosion because we'll never exceed the
@@ -241,8 +241,8 @@ def erode_terrain3(nodes, neighbors, heights, num_iter=1, snapshot=False):
         num_iter = 1
         print(" ERROR: Cannot have less than 1 iteration.")
 
-    water = np.zeros_like(heights)  # ToDo: Dtypes!  Save RAM?!
-    sediment = np.zeros_like(heights)  # ToDo: Dtypes!  Save RAM?!
+    water = np.zeros_like(heights)  # TODO: Dtypes!  Save RAM?!
+    sediment = np.zeros_like(heights)  # TODO: Dtypes!  Save RAM?!
 
     for i in range(num_iter):
         print("  Erosion pass:", i+1,"of", num_iter)
@@ -285,7 +285,7 @@ def erosion_iteration3(verts, neighbors, r_buff, wat, sed):
             if n != -1:
                 compvert = r_buff[n]
                 # Do math to determine if compvert is higher or lower than thisvert
-                # Note: d is using the UNMODIFIED vert positions from
+                # NOTE: d is using the UNMODIFIED vert positions from
                 # the smooth icosphere before any height modification
                 d = calc_distance(verts[i], verts[n])
                 delta = compvert - thisvert  # TODO: Reconcile that the slope functions subtract h1-h0 to get the rise but delta does the reverse here?
@@ -366,8 +366,8 @@ def erode_terrain4(nodes, neighbors, heights, num_iter=1, snapshot=False):
         num_iter = 1
         print(" ERROR: Cannot have less than 1 iteration.")
 
-    water = np.zeros_like(heights)  # ToDo: Dtypes!  Save RAM?!
-    sediment = np.zeros_like(heights)  # ToDo: Dtypes!  Save RAM?!
+    water = np.zeros_like(heights)  # TODO: Dtypes!  Save RAM?!
+    sediment = np.zeros_like(heights)  # TODO: Dtypes!  Save RAM?!
 
     for i in range(num_iter):
         print("  Erosion pass:", i+1,"of", num_iter)
@@ -712,7 +712,7 @@ class WaterDroplet():
 # onto drop 0 and destroy the drops in slots 1 to 5.  Of course, this all depends on whether numpy/numba will allow the slot to be either a class object or like, None or something.
 # If not, then the dict idea is likely the only way to go, and I don't know if numba will like a dict with different-length (but always same type) values.
 
-# 0. rename drop_locs to random_order (note: think of the future when we have working climate that says where to rain; it won't actually be random so the name matters)
+# 0. rename drop_locs to random_order (NOTE: think of the future when we have working climate that says where to rain; it won't actually be random so the name matters)
 # 1. for i in vertices: dests[i] = find lowest(i, neighbors[i], height_read)  # dests indexed to vertices, not that weird shit above.
 # 2.    if dests[i] != -1: calc distance and slope and set soil_read[i], and remove that amount from height_write[i]  # also indexed to vertices.
 # 3. for i in random_order:

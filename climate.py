@@ -11,7 +11,7 @@ from util import xyz2latlon, latlon2xyz, rescale, load_settings, build_image_dat
 SBC = 5.670374419 * 10**-8  # Stefan-Boltzmann constant
 # 0.00000005670374419
 
-# ToDo: Dict is incomplete. (e.g. missing materials, and materials whose value is "0" as a placeholder)
+# TODO: Dict is incomplete. (e.g. missing materials, and materials whose value is "0" as a placeholder)
 # Heat capacity in joules per kg per kelvin
 # Sources:
 # https://www.e-education.psu.edu/earth103/node/1005
@@ -33,7 +33,7 @@ MAT_HEAT_CAPACITY = {
     "sandstone": 0
 }
 
-# ToDo: Dict is incomplete. (e.g. missing materials, and materials whose value is "0" as a placeholder)
+# TODO: Dict is incomplete. (e.g. missing materials, and materials whose value is "0" as a placeholder)
 # Density in kg per meter^3
 # Sources:
 # https://www.e-education.psu.edu/earth103/node/1005
@@ -57,7 +57,7 @@ MAT_DENSITY = {
     "sandstone": 2323
 }
 
-# ToDo: Dict is incomplete. (e.g. missing materials, and materials whose value is "0" as a placeholder)
+# TODO: Dict is incomplete. (e.g. missing materials, and materials whose value is "0" as a placeholder)
 # For Earth, average albedo of the whole planet is about 0.31 (although I've seen figures ranging from 0.29 to 0.31)
 # Sources:
 # https://nsidc.org/cryosphere/seaice/processes/albedo.html
@@ -79,21 +79,21 @@ MAT_ALBEDO = {
     "sandstone": 0
 }
 
-# ToDo: Modify temp based on altitude.  (Partially done; basic method is in place but need temps to change on an absolute scale, not a relative one from lowest to highest point.)
-# ToDo: Modify temp based on atmospheric pressure. e.g. the pressure changes with altitude; part of why death valley is hot is because it's below sea level. Mountain tops are colder with less air pressure.
-# ToDo: Modify pressure based on temp. Wheeeee, it's cyclical. Higher temps cause pressure to lower as the air expands and vice versa. https://scied.ucar.edu/learning-zone/how-weather-works/highs-and-lows-air-pressure
-# ToDo: Make arrays for temperature at various altitudes? (i.e. not just at ground level, but also like the stratosphere etc.) https://scied.ucar.edu/learning-zone/atmosphere/change-atmosphere-altitude
+# TODO: Modify temp based on altitude.  (Partially done; basic method is in place but need temps to change on an absolute scale, not a relative one from lowest to highest point.)
+# TODO: Modify temp based on atmospheric pressure. e.g. the pressure changes with altitude; part of why death valley is hot is because it's below sea level. Mountain tops are colder with less air pressure.
+# TODO: Modify pressure based on temp. Wheeeee, it's cyclical. Higher temps cause pressure to lower as the air expands and vice versa. https://scied.ucar.edu/learning-zone/how-weather-works/highs-and-lows-air-pressure
+# TODO: Make arrays for temperature at various altitudes? (i.e. not just at ground level, but also like the stratosphere etc.) https://scied.ucar.edu/learning-zone/atmosphere/change-atmosphere-altitude
 #       Temp at a given altitude in the air would be surface_temp - (lapse_rate * altitude), which is roughly accurate until you reach the tropopause at around 16 km.
 #       The tropopause is coldest over the equator and warmest over the poles.  https://sciencing.com/tutorial-calculate-altitude-temperature-8788701.html
 #       In the stratosphere things start to warm up again and T = -131 + (0.003 * altitude in meters) according to a NASA equation mentioned in the Sciencing article.
 #       https://earthscience.stackexchange.com/questions/668/why-is-the-troposphere-8km-higher-at-the-equator-than-the-poles
-# ToDo: Also establish the latitudes of the "tropics" bands of tempreatures (low, mid, high latitudes; tropics, subtropics, polar)
+# TODO: Also establish the latitudes of the "tropics" bands of tempreatures (low, mid, high latitudes; tropics, subtropics, polar)
 #   https://www.worldatlas.com/articles/what-is-the-effect-of-latitude-on-temperature.html
-# ToDo: Factor in axial tilt (tropic of cancer, tropic of capricorn, etc.)  NOTE: latitude bands should probably be defined with a GLOBAL? maybe a dict?
+# TODO: Factor in axial tilt (tropic of cancer, tropic of capricorn, etc.)  NOTE: latitude bands should probably be defined with a GLOBAL? maybe a dict?
 #       Partially done for assign_surface_temp. There's axial tilt.  One thing that needs to be done is to consider, for the future, what day a year starts in relation to where in the orbit the planet is.
 #       e.g. in the Western world we've standardized on the first day of the year being somewhat arbitrary compared to, say, a solstice or equinox. As a result, the year starts 10 days after the winter solstice and the 1st equinox is the 80th day of the year.
 #       For the worldbuilders out there it would probably be helpful to give them a way to choose which day of the year is the first day.  Internally, I think Nixis will probably use an equinox as day 1 because that's the day with the easiest solar flux.
-# ToDo: And due to axial tilt, take a time of year as an input to modify values (summer temps are different from winter temps)
+# TODO: And due to axial tilt, take a time of year as an input to modify values (summer temps are different from winter temps)
 #       The time of year should be set up that it can be any arbitrary amount of time, not a set number like 12, so that we can have planets with any orbital period, and cultures with arbitrary calendar increments (3 months, 60 weeks, 30 months, whatever)
 #       This is partially started with the day2deg and deg2day functions.
 # Examples:
@@ -102,7 +102,7 @@ MAT_ALBEDO = {
 # -30 -43 -57 -61 -61 -63 -64 -63 -63 -53 -39 -29 South Pole average low in C
 # -15  -9  -4   6  15  21  22  18  12   2  -9 -14 North Pole average high in C
 # -21 -17 -15  -4   4  11  13  10   4  -3 -15 -20 North Pole average low in C
-# ToDo: Solar insolation. Eventually this is where the power of incoming solar radiation would be used to determine the energy and therefore the temperature (when combined with gas composition, albedo, black body radiation.. and other stuff..)
+# TODO: Solar insolation. Eventually this is where the power of incoming solar radiation would be used to determine the energy and therefore the temperature (when combined with gas composition, albedo, black body radiation.. and other stuff..)
 #   NOTE: The amount of watts per m^2 depends on the surface area, which depends on the radius. The radius defines a flat disc (cross section) of the planet pi*r^2 as viewed from the star, which gives the TSI "constant" which is then distributed over the surface 4*pi*r^2.
 #   "the relative contribution of the atmosphere and the surface to each process (absorbing sunlight versus radiating heat) is asymmetric. The atmosphere absorbs 22 percent of incoming sunlight while the surface absorbs 47.
 #    The atmosphere radiates heat equivalent to 58 percent of incoming sunlight; the surface radiates only 11 percent. In other words, most solar heating happens at the surface, while most radiative cooling happens in the atmosphere.""
@@ -132,9 +132,9 @@ MAT_ALBEDO = {
 # ** http://www.applet-magic.com/insolation.htm
 # * On an ordinary day, the insolation is proportional to the sine of the Sun's altitude. When the Sun is 30° above the horizon, the sunlight energy per square meter is half of what it is when the Sun is directly overhead.
 # ** https://svs.gsfc.nasa.gov/4466
-# ToDo: Ocean water's huge volume and water's high specific heat capacity make it the dominant force in climate. The atmosphere is 'subservient' to the ocean.
+# TODO: Ocean water's huge volume and water's high specific heat capacity make it the dominant force in climate. The atmosphere is 'subservient' to the ocean.
 #
-# ToDo: Climate/Biome classifications, e.g.  Köppen-Geiger, Trewartha, Holdridge, Whittaker. (I want to support multiple classification systems.)
+# TODO: Climate/Biome classifications, e.g.  Köppen-Geiger, Trewartha, Holdridge, Whittaker. (I want to support multiple classification systems.)
 #   This might prove helpful, although it's for processing images: https://github.com/MightyBOBcnc/speculative-koppen Maybe it can be adapted to icosphere, and more than 2 months.
 #   https://en.wikipedia.org/wiki/Climate_classification and https://en.wikipedia.org/wiki/Biome
 #   worldengine might also have some useful code in whatever is the most up-to-date fork. https://github.com/MightyBOBcnc/worldengine
@@ -146,21 +146,21 @@ MAT_ALBEDO = {
 #   "the total amount of water vapor in the atmosphere remains approximately the same over time.
 #    However, over the continents, precipitation routinely exceeds evaporation, and conversely, over the oceans, evaporation exceeds precipitation."
 #
-# ToDo: Not just rain, but frozen types of precipitation as well, and mixes (snow, sleet, etc.)
-# ToDo: Not just evaporation, not just transpiration from plants, but also sublimation in colder regions.
-# ToDo: When I start implementing plant growth and 'true color' maps, take into account that the pigment of the plants will likely respond to the spectrum and intensity of the star.
+# TODO: Not just rain, but frozen types of precipitation as well, and mixes (snow, sleet, etc.)
+# TODO: Not just evaporation, not just transpiration from plants, but also sublimation in colder regions.
+# TODO: When I start implementing plant growth and 'true color' maps, take into account that the pigment of the plants will likely respond to the spectrum and intensity of the star.
 #   Some worlds will have green plants, others red, some black, etc. https://www.reddit.com/r/worldbuilding/comments/1dui0v/plants_on_other_worlds_reference_chart/
 #   Additional reference for plant pigment color vs star spectrum: http://panoptesv.com/SciFi/ColorsOfAlienWorlds/AlienFields.php
-# ToDo: Eventually perhaps take volcanic emissions into account.  (Note: If this is done over time, remember that there's probably much more volcanism on a young planet.)
-# ToDo: Maybe an air quality index?  e.g. for tracking saharan-like dust storms, volcanoes, and forest fires?  lol, even pollen during spring.
-# ToDo: I'd like to be able to determine areas on the planet that are most likely to experience severe weather (I'm mainly interested in thunderstorms but hurricanes, monsoons, extreme winds, and blizzards are also okay to do).
+# TODO: Eventually perhaps take volcanic emissions into account.  (NOTE: If this is done over time, remember that there's probably much more volcanism on a young planet.)
+# TODO: Maybe an air quality index?  e.g. for tracking saharan-like dust storms, volcanoes, and forest fires?  lol, even pollen during spring.
+# TODO: I'd like to be able to determine areas on the planet that are most likely to experience severe weather (I'm mainly interested in thunderstorms but hurricanes, monsoons, extreme winds, and blizzards are also okay to do).
 #   I imagine that a combination of humidity and temperature could produce a crude map like this.  Add in wind speed and atmospheric pressure to improve accuracy.  Maybe also a rate of exchange between air and land (precip and evap) with areas of high exchange.
-# ToDo: Places near large bodies of water experience slower temperature changes because the nearby water is a heat sink. It takes more energy to heat/cool the water than land.
-# ToDo: Orographic effect and rain shadows.  This will affect the erosion functions and the biome functions.
-# ToDo: In the future, possibly consider the effect of solar cycles (e.g. sun spots and flare activity) and how that changes the watts/M^2 insolation on the planet over time?
-# ToDo: Way the heck in the future maybe consider elliptical orbits.
-# ToDo: Even further in the future, maybe take a shot at planets that are tidally locked to their host star.
-# ToDo: For any calculation of the climate over time, consider that the brightness of a star changes over geologic time scales (e.g. our sun is 30% brighter today than it was 4.5 billion years ago or like 3.3% every 500 million years).
+# TODO: Places near large bodies of water experience slower temperature changes because the nearby water is a heat sink. It takes more energy to heat/cool the water than land.
+# TODO: Orographic effect and rain shadows.  This will affect the erosion functions and the biome functions.
+# TODO: In the future, possibly consider the effect of solar cycles (e.g. sun spots and flare activity) and how that changes the watts/M^2 insolation on the planet over time?
+# TODO: Way the heck in the future maybe consider elliptical orbits.
+# TODO: Even further in the future, maybe take a shot at planets that are tidally locked to their host star.
+# TODO: For any calculation of the climate over time, consider that the brightness of a star changes over geologic time scales (e.g. our sun is 30% brighter today than it was 4.5 billion years ago or like 3.3% every 500 million years).
 #       Also the orbital distance of a planet changes as well (the star radiates its own mass away and Earth is slowly drifting a few meters away every year? The drifting away might be momentum/gravity related, not the mass change).
 #       https://www.nature.com/articles/s41586-021-03873-w
 #       https://www.space.com/venus-never-habitable-no-oceans
@@ -168,19 +168,19 @@ MAT_ALBEDO = {
 #       This same study notes that Earth could have become a steam house if the sun had been brighter. Which illustrates something about Nixis' assumptions: It doesn't simulate formation of the crust, or the formation of oceans, it just assumes they exist.
 #       https://www.space.com/19118-early-earth-atmosphere-faint-sun.html
 #       And the gas composition changes, too, particularly if life starts spewing oxygen, of course, which changes the greenhouse strength.
-# ToDo: "Vapor Pressure Deficit" seems like something that might be easy to approximate: https://phys.org/news/2021-11-increasingly-frequent-wildfires-linked-human-caused.html
-# ToDo: Glaciation causes sea level to drop as water gets locked up in ice.  And the reverse is true when glaciers melt.
+# TODO: "Vapor Pressure Deficit" seems like something that might be easy to approximate: https://phys.org/news/2021-11-increasingly-frequent-wildfires-linked-human-caused.html
+# TODO: Glaciation causes sea level to drop as water gets locked up in ice.  And the reverse is true when glaciers melt.
 
 @njit(cache=True)
 def day2deg(year_length, day):
     """Convert a calendar day into degrees that the planet has orbited."""
     # return ((2*np.pi)/year_length) * day
-    return (day/year_length) * 360.0  # ToDo: Should this be year_length-1 because we're counting from 0?
+    return (day/year_length) * 360.0  # TODO: Should this be year_length-1 because we're counting from 0?
 
 @njit(cache=True)
 def deg2day(year_length, degrees):
     """Convert degrees that the planet has orbited into a calendar day."""
-    return degrees * (year_length/360.0)  # ToDo: Should this be year_length-1 because we're counting from 0?
+    return degrees * (year_length/360.0)  # TODO: Should this be year_length-1 because we're counting from 0?
 
 # https://www.geeksforgeeks.org/python-find-closest-number-to-k-in-given-list/
 @njit(cache=True)
@@ -190,7 +190,7 @@ def find_nearest(arr, num):
     # return arr[idx]  # Returns the value of the nearest number
     return (np.abs(arr - num)).argmin()  # Returns the index
 
-# ToDo: I wonder if a triangle wave would be more appropriate than a sine wave? A circular orbit is (effectively) a constant speed but a sine wave isn't linear.
+# TODO: I wonder if a triangle wave would be more appropriate than a sine wave? A circular orbit is (effectively) a constant speed but a sine wave isn't linear.
 # One of the pages I read about tilt in the context of a 90 degree tilted axis said the transition of the solar zenith would be essentially a continuous linear motion
 # from pole to pole and back again. On the other hand, all the annual insolation chart graphics seem to approximate a sine more than a linear spike.
 # https://stackoverflow.com/questions/12332392/triangle-wave-shaped-array-in-python
@@ -228,7 +228,7 @@ def calc_planet_equilibrium(flux, albedo, radius=1):
     # Because only half of the planet is lit, this immediately cuts that number in half.
     # Because a sphere isn't evenly lit (cosine falloff with latitude and longitude), this is cut in half again.
     # So, when averaged over the whole planet the incoming energy is 0.25 * TSI or ~ 342.5 W/m^2
-    # But in addition to that some simply bounces away because of albedo. About 31% bounces away. 342 * (1 - 0.31) or 236.325 W/m^2 (note: I've seen sources say albedo is 29% to 31%)
+    # But in addition to that some simply bounces away because of albedo. About 31% bounces away. 342 * (1 - 0.31) or 236.325 W/m^2 (NOTE: I've seen sources say albedo is 29% to 31%)
     # 22% gets absorbed by the atmosphere by water vapor, dust, and ozone, and 47% gets absorbed by the surface. (so of the 69% that doesn't bounce, about 31.8% is absorbed in the atmosphere and 68.2% by the surface)
 
     earth_radius = 6378100.0  # NOTE: Manually keying this in for now because something is weird/wrong with visualizing the temperatures on a full-sized planet at the moment so I'm visualizing at radius 1.0 for the time being.
@@ -237,7 +237,7 @@ def calc_planet_equilibrium(flux, albedo, radius=1):
     planet_cross_section = np.pi * earth_radius**2
     planet_surface_area = 4 * np.pi * earth_radius**2  # Sunlight only falls on half of the surface area, however
 
-    # ToDo: energy at the cross section, energy reduced by albedo, and maybe energy that bounces off the atmosphere? not sure if that's the same thing.  or maybe I meant absorbed by the atmosphere so it doesn't reach ground.
+    # TODO: energy at the cross section, energy reduced by albedo, and maybe energy that bounces off the atmosphere? not sure if that's the same thing.  or maybe I meant absorbed by the atmosphere so it doesn't reach ground.
     # For basic temp assignment, I could start by calculating the airless body temperature and then just multiply by a fudge factor for greenhouse effect. (e.g. earth is like 34 C higher than it would be with no atmospheric blanket)
     # Basic energy balance in/out
     total_energy = tsi * planet_cross_section  # Total energy of the planet cross-section, in W
@@ -291,6 +291,7 @@ def calc_water_equilibrium(flux):
 
     sim_steps = 10  # Max number of steps. Will break early if equilibrium is reached.
     time_step = 3600  # W is J per second. This is the number of seconds for each step.
+    time_units = None
     if time_step == 1:
         time_units = "seconds"
     elif time_step == 60:
@@ -360,14 +361,14 @@ def calc_water_equilibrium(flux):
 @njit(cache=True, parallel=True, nogil=True)
 def assign_surface_temp(verts, altitudes, radius, tilt):
     """Assign starting surface temperatures based on equatorial distance and altitude."""
-    # ToDo: Temps will only ever be in a range from approximately -60.0 to +60.0 C, so, what's a good dtype for that?  The world record low is approx -90 C, and the record high is approx +56 C.
+    # TODO: Temps will only ever be in a range from approximately -60.0 to +60.0 C, so, what's a good dtype for that?  The world record low is approx -90 C, and the record high is approx +56 C.
     #       float16 could hold that but with little precision. float32 is probably the smallest safe choice.  I also may want room for higher and lower values than Earth produces.
     #       Consider also that Kelvin and Celsius have the same unit size; an increase of 1 K is identical to an increase of 1 C; the only difference is that C is offset by +273.15 from Kelvin values. (water freezes at 273.15 K and boils at 373.15 K)
     #       So given that I might want to someday expand the planet generator to non-Earthlike planets, or that I might need temperatures above/below Earth normals, maybe I should store them and calculate them in Kelvin.
     #       Also the fact that black body radiation is probably always done with kelvin and is tied to temperature and incoming/outgoing energy.
     surface_temps = np.zeros(len(verts), dtype=np.float32)
 
-    # ToDo: Okay, so, temp fallof with altitude is tied to humidity; more humidity = slower falloff.
+    # TODO: Okay, so, temp fallof with altitude is tied to humidity; more humidity = slower falloff.
     # https://www.onthesnow.com/news/a/15157/does-elevation-affect-temperature This says temp falls off at about 9.8C per km in "dry" air, or 6C per km if humidity is 100% (NOTE: This wouldn't hold true for alien planets)
     # https://scied.ucar.edu/learning-zone/atmosphere/change-atmosphere-altitude Says average is 6.5C per km.  I think the consensus is 6.5C/km or 0.65 per 100 meters.
     # It's called "Lapse Rate" https://en.wikipedia.org/wiki/Lapse_rate and wiki says that the moist rate is more like 5C per km.. but the ICAO says an 'average' is 6.49 or 6.56C globally? Britannica suggests 6.5
@@ -419,7 +420,7 @@ def assign_surface_temp(verts, altitudes, radius, tilt):
         # surface_temps[v] = max(np.cos(np.abs(dist_from_equator) * np.pi/180), 0) - np.abs(h2[v]) if h2[v] > 0 else max(np.cos(np.abs(dist_from_equator) * np.pi/180), 0) - 0.1
         surface_temps[v] = max(np.cos(np.abs(dist_from_equator) * np.pi/180), 0) - np.abs(h2[v]) + 0.1 if h2[v] > 0 else max(np.cos(np.abs(dist_from_equator) * np.pi/180), 0)
 
-        # ToDo: Test splitting this into a variable for the equator falloff, square the variable, then set st[v] to that * 1-h2 because I want to see if that might run faster than doing it all on one line.
+        # TODO: Test splitting this into a variable for the equator falloff, square the variable, then set st[v] to that * 1-h2 because I want to see if that might run faster than doing it all on one line.
         # Something similar was true for the sample_noise function. It was faster to fill the array with a simple operation and then do multiplication at the end. Although I'm not sure if I have any simple constants to multiply against here.
 
     # return rescale(surface_temps, -60, 60)
@@ -428,7 +429,7 @@ def assign_surface_temp(verts, altitudes, radius, tilt):
 
 # Insolation at the top of the atmosphere
 @njit(cache=True, parallel=True, nogil=True)
-def sample_insolation(arr, verts, radius, rotation, tilt):  # ToDo: Test and see if modifying 'arr' in place is more performant than making an empty array and RETURNING it to the parent, where it will then be added to the insolation array.
+def sample_insolation(arr, verts, radius, rotation, tilt):  # TODO: Test and see if modifying 'arr' in place is more performant than making an empty array and RETURNING it to the parent, where it will then be added to the insolation array.
     """Sample insolation for given points at a single second in time."""  # Most likely modifying in place is more performant, but by how much?
     for v in prange(len(verts)):
         x, y, z = verts[v][0], verts[v][1], verts[v][2]
@@ -487,7 +488,7 @@ def brute_daily_insolation(verts, altitudes, radius, tilt, snapshot=False):
         sample_insolation(surface_temps, verts, radius, rotation, tilt)
         rotation += rot_amt
 
-        if snapshot:  #ToDo: This is quite slow.
+        if snapshot:  #TODO: This is quite slow.
             dictionary = {}
             rescaled_i = rescale(surface_temps, 0, 255)  #NOTE: Due to the relative nature of rescale, if the min or max insolation changes then the scale will be messed up.
             dictionary[f"{i+1:03d}"] = [rescaled_i, 'gray']  # Could instead possibly just multiply the absolute value x10 or square it or something and use a 16-bit image instead of 8-bit.
@@ -501,7 +502,7 @@ def brute_daily_insolation(verts, altitudes, radius, tilt, snapshot=False):
     # print("  Flux min is ", tmin)
     # print("  Flux max is ", tmax)
 
-    return surface_temps  # ToDo: This should be renamed to something else like insolation since this function is not working with temperature.
+    return surface_temps  # TODO: This should be renamed to something else like insolation since this function is not working with temperature.
     # return surface_temps / 360
 
 # Insolation at the top of the atmosphere
@@ -542,7 +543,7 @@ def calc_insolation_slice(radius, tilt):
     rot_steps = 360
     rot_amt = 360.0 / rot_steps
 
-    for x in range(rot_steps): # ToDo: x is an unused var. We could do something about that, like the restructure of make_ll_arr, or a while loop, but it's not strictly needed.
+    for x in range(rot_steps): # TODO: x is an unused var. We could do something about that, like the restructure of make_ll_arr, or a while loop, but it's not strictly needed.
         sample_insolation(result, points, radius, rotation, tilt)
         rotation += rot_amt
 
@@ -599,7 +600,7 @@ def calc_yearly_insolation(points, height, radius, axial_tilt, snapshot=False):
     # A "year" being 1 full revolution, measured in 1 degree increments.
     annual_insolation = np.zeros(len(points), dtype=np.float32)
 
-    # ToDo: We'll deal with the degrees-per-day later, e.g. 360 divided by days-per-year to get
+    # TODO: We'll deal with the degrees-per-day later, e.g. 360 divided by days-per-year to get
     # the proper value to plug into calc_seasonal_tilt for the second number.
 
     # for x in range(cfg.WORLD_CONFIG["year_length"]):
@@ -662,11 +663,11 @@ def calc_hour_angle_insolation(tsi):
     print(f"Flux at Lat: {latitude}, Lon: {longitude} at hour {hour} is: {flux}")
     print(f"Test is {test}")
 
-# ToDo: Should it be called humidity or moisture? This is the water content of the air.  Pretty sure it's humidity.
-# ToDo: Do some book learnin' and find out if altitude modifies humidity. And if temperature modifies humidity, too.
+# TODO: Should it be called humidity or moisture? This is the water content of the air.  Pretty sure it's humidity.
+# TODO: Do some book learnin' and find out if altitude modifies humidity. And if temperature modifies humidity, too.
 # https://en.wikipedia.org/wiki/Properties_of_water
 def assign_surface_humidity(verts, water_mask):
-    # ToDo: What's the best dtype for humidity? Humidity can only range from 0-100 but I may want decimals. np.float16 might get me 1 or 2 decimal places, rounded. float32 gets me 5 or 6 decimal places, rounded. uint8 would be more than enough for int values.
+    # TODO: What's the best dtype for humidity? Humidity can only range from 0-100 but I may want decimals. np.float16 might get me 1 or 2 decimal places, rounded. float32 gets me 5 or 6 decimal places, rounded. uint8 would be more than enough for int values.
     #       Once I have the climate system working in float32 it might be interesting to go back and change things out for float16 and see how much things change.
     humidity = np.zeros(len(verts), dtype=np.float32)
 

@@ -67,6 +67,8 @@ def make_bool_elevation_mask(height, mask_elevation, mode):
     """
     # NOTE: Some other functions may not like that a dtype of bool_ stores "True" or "False" instead of numbers.
     # Keep an eye on that. We can always switch to int8 or uint8 and store 0 or 1 if we need to.
+    # This might be a problem if we want to use these masks in other processes, e.g. in erosion multiplying
+    # the mask against the changes to erosion to determine which verts do or don't get affected (multiply by 0 or 1).
     mask = np.zeros(len(height), dtype=np.bool_)
 
     # NOTE: There's probably a more numpy-centric way to do this, like np.where()

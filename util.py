@@ -49,7 +49,7 @@ def create_mesh(divisions):
     print(f"Mesh generated in {time_end - time_start :.5f} sec")
     return points, cells
 
-# ToDo: Experiment with lat/lon performance benchmarking.
+# TODO: Experiment with lat/lon performance benchmarking.
 # 1. Does performance change if the 180 in latlon2xyz is Int or Float?
 # 2. Does performance change if pi/180 is replaced with a constant?
 # 3. Is there any speed difference between e.g. np.arcsin / math.arcsin, etc.?
@@ -59,10 +59,12 @@ def create_mesh(divisions):
 @njit(cache=True)
 def xyz2latlon(x, y, z, r):
     """Convert 3D spatial XYZ coordinates into Latitude and Longitude.
+
     x -- X coordinate.
     y -- Y coordinate.
     z -- Z coordinate.
-    r -- World radius."""
+    r -- World radius. (in meters)
+    """
     # Old method; will output NaNs if (Z/R) > 1 or (Z/R) < -1
     # lat = np.degrees(np.arcsin(z / r))
 
@@ -79,9 +81,11 @@ def xyz2latlon(x, y, z, r):
 @njit(cache=True)
 def latlon2xyz(lat, lon, r):
     """Convert Latitude and Longitude into 3D spatial XYZ coordinates.
+
     lat -- Latitude.
     lon -- Longitude.
-    r -- World radius."""
+    r -- World radius. (in meters)
+    """
     x = r * np.cos(lat*(np.pi/180)) * np.cos(lon*(np.pi/180))
     y = r * np.cos(lat*(np.pi/180)) * np.sin(lon*(np.pi/180))
     z = r * np.sin(lat*(np.pi/180))
@@ -109,17 +113,18 @@ def to_unsigned(x):
 
 # https://stats.stackexchange.com/questions/351696/normalize-an-array-of-numbers-to-specific-range
 # https://learn.64bitdragon.com/articles/computer-science/data-processing/min-max-normalization
-# ToDo: Need to take a closer look at the shape of the data that is acceptable for this function
+# TODO: Need to take a closer look at the shape of the data that is acceptable for this function
 # because I've had some weird issues with numba not wanting to compile the return values
 # if the array wasn't flattened before being set to rescale()
-# ToDo: Prevent accidental div by 0 errors by checking to see if x_range is 0.
-# ToDo: Also NaN checks related to above.
-# ToDo: If "mid" is supplied, then rescale the upper and lower values separately. (rescale with two ranges, lower to mid, and mid to upper)
-# ToDo: Absolute value scaling support. E.G. If the supplied array is exactly 0 to 1, then each 0.00113019 would scale to approximately 10 meters if our absolute max is Mt Everest at 8848 meters.
-# Possible ToDo: A parameter called "inplace" that is either true or false (default false) that modifies the array in place when true. (Numba might barf on this as one kernel would return, and the other wouldn't)
+# TODO: Prevent accidental div by 0 errors by checking to see if x_range is 0.
+# TODO: Also NaN checks related to above.
+# TODO: If "mid" is supplied, then rescale the upper and lower values separately. (rescale with two ranges, lower to mid, and mid to upper)
+# TODO: Absolute value scaling support. E.G. If the supplied array is exactly 0 to 1, then each 0.00113019 would scale to approximately 10 meters if our absolute max is Mt Everest at 8848 meters.
+# Possible TODO: A parameter called "inplace" that is either true or false (default false) that modifies the array in place when true. (Numba might barf on this as one kernel would return, and the other wouldn't)
 @njit(cache=True, parallel=True, nogil=True)
 def rescale(x, lower, upper, mid=None, mode=None, u_min=None, u_max=None):
     """Re-scale (normalize) an array to a given lower and upper bound.
+
     x -- The input array.
     lower -- The desired new min value.
     upper -- The desired new max value.
@@ -168,7 +173,7 @@ def rescale(x, lower, upper, mid=None, mode=None, u_min=None, u_max=None):
         if mid is None:
             print("ERROR: Must supply a middle value to use rescale modes.")
             print("Continuing with unmodified data.")
-            # ToDo: Maybe raise an exception instead. Numba supports the following: https://numba.readthedocs.io/en/stable/reference/pysupported.html#exception-handling
+            # TODO: Maybe raise an exception instead. Numba supports the following: https://numba.readthedocs.io/en/stable/reference/pysupported.html#exception-handling
             # sys.exit(0)
             return x
         elif mode == 'lower':
@@ -187,15 +192,17 @@ def rescale(x, lower, upper, mid=None, mode=None, u_min=None, u_max=None):
                     new_array[a] = ((x[a] - mid) / x_range) * new_range + mid
             return new_array
 
-# Possible ToDo: A parameter called "inplace" that is either true or false (default false) that modifies the array in place when true.
+# Possible TODO: A parameter called "inplace" that is either true or false (default false) that modifies the array in place when true.
 @njit(cache=True, parallel=True, nogil=True)
 def power_rescale(x, mask=None, mode=None, power=1.0):
     """Rescale values using a power function.
+
     x -- The array to modify.
     mask -- An array of True/False that matches the length of x.
     mode -- 0 means rescale items in x that are False in the mask,
             1 means rescale items in x that are True in the mask.
-    power -- The power to apply to items in x."""
+    power -- The power to apply to items in x.
+    """
     new_array = np.copy(x)
 
     temp_upper = 1.0
@@ -209,7 +216,7 @@ def power_rescale(x, mask=None, mode=None, power=1.0):
 
     temp_range = temp_upper - temp_lower
 
-    # ToDo: We can possibly consolidate the structure in here to shove everything under mode==1 or mode==0 to reduce the number of if/elif branches.
+    # TODO: We can possibly consolidate the structure in here to shove everything under mode==1 or mode==0 to reduce the number of if/elif branches.
     # There might also be some validity to the idea of building a separate list of vertices to modify and only operating on those instead of doing
     # repeated comparisons of if mode==N and mask[a] for every vertex on the mesh.
     # Also if both rescale and power_rescale will continue to exist as separate functions then there's no reason that power_rescale should do all the math itself for the temporary conversion to 0-1 range and back; just call rescale.
@@ -270,6 +277,7 @@ def power_rescale(x, mask=None, mode=None, power=1.0):
 # NOTE: Unused.
 def make_ranges(arr_len, threads):
     """Make number ranges for threading from a given length.
+
     arr_len -- Integer. The length of the data to be split.
     threads -- Integer. The number of chunks/threads you want to use.
     """
@@ -309,7 +317,7 @@ def make_ll_arr(width, height, radius):
     lat = 90
     lon = -180
     latpercent = 180 / (height - 1)
-    # lonpercent = 360 / (width - 1)  # ToDo: Fix hairline seam where the image wraps around the sides. We don't actually want to reach -180 because it's the same as +180. (Might not be an issue at higher subdivisions >= 900)
+    # lonpercent = 360 / (width - 1)  # TODO: Fix hairline seam where the image wraps around the sides. We don't actually want to reach -180 because it's the same as +180. (Might not be an issue at higher subdivisions >= 900)
     lonpercent = 360 / width  # NOTE: When the 2D lat/lon coordinates are visualized on the 3D planet it shows that this method (combined with the MAX operation below) places a column of pixels right on the 180 longitude (at least for a 2k map).
 
     # Loop through Latitude starting at north pole. Pixels are filled per row.
@@ -322,7 +330,7 @@ def make_ll_arr(width, height, radius):
     return map_array
 
 # NOTE: Keep an eye out for weird numba compile failures in here.
-# ToDo: Want to take a look at refactoring this later without using so many np.array() calls, and possibly without using numpy at all as it may have too much overhead for such small arrays (array size is like 3 items for neighbors)
+# TODO: Want to take a look at refactoring this later without using so many np.array() calls, and possibly without using numpy at all as it may have too much overhead for such small arrays (array size is like 3 items for neighbors)
 @njit(cache=True, parallel=True, nogil=True)
 def make_rgb_array(width, height, dists, nbrs, colors):
     """Sample vertices and build an RGB map for export."""
@@ -336,7 +344,7 @@ def make_rgb_array(width, height, dists, nbrs, colors):
 
     for h in prange(height):
         for w in prange(width):
-            # ToDo: For certain maps like a B&W land/water mask, or the tectonic plate map I might actually want hard borders without the anti-aliased smoothing of averages along the edges.
+            # TODO: For certain maps like a B&W land/water mask, or the tectonic plate map I might actually want hard borders without the anti-aliased smoothing of averages along the edges.
             # For this perhaps I could have the function take an argument like 'AA' for anti-aliashed.  If True, use the weighted distance logic. Else use a different logic. Maybe even split the logics out to different functions.
             # The other logic could possibly use the weighted distance logic with 1 extra step on the end that simply rounds to either the lowest or highest value (e.g. 0 or 1, 0 or 255).
             # https://math.stackexchange.com/questions/3817854/formula-for-inverse-weighted-average-smaller-value-gets-higher-weight
@@ -345,14 +353,14 @@ def make_rgb_array(width, height, dists, nbrs, colors):
             ws = np.array([1 / ((i+0.00001) / sd) for i in dists[h][w]], dtype=np.float64)  # weights
             t = np.sum(ws)  # Total sum of weights
             iw = np.array([i/t for i in ws], dtype=np.float64)  # Inverted weights
-            value = int(np.sum(np.array([colors[nbrs[h][w][i]]*iw[i] for i in range(len(iw))])))  # ToDo: If I add support for floating point image formats like EXR or HDR then this can't be an int.
+            value = int(np.sum(np.array([colors[nbrs[h][w][i]]*iw[i] for i in range(len(iw))])))  # TODO: If I add support for floating point image formats like EXR or HDR then this can't be an int.
 
-            # ToDo: Support for setting channel values individually instead of all the same. Possibly as sub-functions depending on performance and flow/structure.
+            # TODO: Support for setting channel values individually instead of all the same. Possibly as sub-functions depending on performance and flow/structure.
             map_array[h][w] = [value, value, value]
 
     return map_array.astype(orig_dtype)
 
-# ToDo: Want to take a look at refactoring this later without using so many np.array() calls, and possibly without using numpy at all as it may have too much overhead for such small arrays (array size is like 3 items for neighbors)
+# TODO: Want to take a look at refactoring this later without using so many np.array() calls, and possibly without using numpy at all as it may have too much overhead for such small arrays (array size is like 3 items for neighbors)
 @njit(cache=True, parallel=True, nogil=True)
 def make_gray_array(width, height, dists, nbrs, colors):
     """Sample vertices and build a grayscale map for export."""
@@ -365,7 +373,7 @@ def make_gray_array(width, height, dists, nbrs, colors):
 
     for h in prange(height):
         for w in prange(width):
-            # ToDo: For certain maps like a B&W land/water mask, or the tectonic plate map I might actually want hard borders without the anti-aliased smoothing of averages along the edges.
+            # TODO: For certain maps like a B&W land/water mask, or the tectonic plate map I might actually want hard borders without the anti-aliased smoothing of averages along the edges.
             # For this perhaps I could have the function take an argument like 'AA' for anti-aliashed.  If True, use the weighted distance logic. Else use a different logic. Maybe even split the logics out to different functions.
             # The other logic could possibly use the weighted distance logic with 1 extra step on the end that simply rounds to either the lowest or highest value (e.g. 0 or 1, 0 or 255).
             # https://math.stackexchange.com/questions/3817854/formula-for-inverse-weighted-average-smaller-value-gets-higher-weight
@@ -374,7 +382,7 @@ def make_gray_array(width, height, dists, nbrs, colors):
             ws = np.array([1 / ((i+0.00001) / sd) for i in dists[h][w]], dtype=np.float64)  # weights
             t = np.sum(ws)  # Total sum of weights
             iw = np.array([i/t for i in ws], dtype=np.float64)  # Inverted weights
-            value = int(np.sum(np.array([colors[nbrs[h][w][i]]*iw[i] for i in range(len(iw))])))  # ToDo: If I add support for floating point image formats like EXR or HDR then this can't be an int.
+            value = int(np.sum(np.array([colors[nbrs[h][w][i]]*iw[i] for i in range(len(iw))])))  # TODO: If I add support for floating point image formats like EXR or HDR then this can't be an int.
 
             map_array[h][w] = value
 
@@ -382,9 +390,10 @@ def make_gray_array(width, height, dists, nbrs, colors):
 
 def build_image_data(colors=None):  # Could rename this to like make_image_data (my naming conventions are not unitform, some functions are "make_", some are "build_", and some are "create_"; make_ would be shortest)
     """Use KD-Tree results to sample vertices and build a map for export.
-    colors -- A dict of numpy arrays. Keys are names, arrays hold the data.
+
+    colors -- A dict whose keys are names (strings), values are numpy arrays that hold the data.
     """
-    # ToDo: In the future I might have a vert array with vertex colors that
+    # TODO: In the future I might have a vert array with vertex colors that
     # aren't in a separate height array so I'll need to add a verts argument or
     # something, and an index for which sub-array holds the vertex colors.
     # (This is why colors=None, in case it isn't passed, but hasn't been handled yet..)
@@ -392,7 +401,7 @@ def build_image_data(colors=None):  # Could rename this to like make_image_data 
     # Possible improvements include averaging up to 6 neighbors if lat/lon is
     # directly on a vertex. (if dist to 1 vert is <= some tiny number)
 
-    options = load_settings("options.json")  # ToDo: Probably grab options from CFG instead of from disk.
+    options = load_settings("options.json")  # TODO: Probably grab options from CFG instead of from disk.
     width = options["img_width"]
     height = options["img_height"]
 
@@ -403,17 +412,17 @@ def build_image_data(colors=None):  # Could rename this to like make_image_data 
     result = {}
 
     if not isinstance(colors, dict):
-        print("ERROR: Must pass a dict when saving out texture maps.")  # ToDo: Better error handling.
+        print("ERROR: Must pass a dict when saving out texture maps.")  # TODO: Better error handling.
 
     for key, container in colors.items():
         array = container[0]
         mode = container[1]
         if array.dtype in ('int8', 'uint8', 'bool_'):  # uint8 is technically safe for rescale between 0-255
-            colors[key] = [rescale(array.astype(np.float64), 0, 255), mode]  # ToDo: Will pillow choke if it gets passed a float64 array?
-        elif array.dtype in ('uint16', 'uint32'):  # ToDo: Uh, why did I exempt uint32?
+            colors[key] = [rescale(array.astype(np.float64), 0, 255), mode]  # TODO: Will pillow choke if it gets passed a float64 array?
+        elif array.dtype in ('uint16', 'uint32'):  # TODO: Uh, why did I exempt uint32?
             pass
         else:  # Fallback for unexpected dtypes
-            colors[key] = [rescale(array, 0, 255), mode]  # ToDo: Will pillow be okay?  We're not doing an .astype to change the dtype here.
+            colors[key] = [rescale(array, 0, 255), mode]  # TODO: Will pillow be okay?  We're not doing an .astype to change the dtype here.
 
     for key, container in colors.items():
         array = container[0]
@@ -428,7 +437,7 @@ def build_image_data(colors=None):  # Could rename this to like make_image_data 
             # 4k * 2k:   1.5 to 2.5 seconds
             # 8k * 4k:   5 to 7 seconds
             # 16k * 8k:  24 seconds
-            # 32k * 16k: 94 seconds, but something fails somewhere and an incomplete image gets written to disk; possibly a Pillow problem.
+            # 32k * 16k: BUG: 94 seconds, but something fails somewhere and an incomplete image gets written to disk; possibly a Pillow problem.
             pixels = make_gray_array(width, height, dists, nbrs, array)
         time_end = time.perf_counter()
 
@@ -442,22 +451,24 @@ def build_image_data(colors=None):  # Could rename this to like make_image_data 
 
     return result
 
-# ToDo: Support for saving images with higher bit depths
+# TODO: Support for saving images with higher bit depths
 #    and maybe additional formats (tiff, exr, etc).
-# ToDo: Attach metadata to saved images such as:
+# TODO: Attach metadata to saved images such as:
 #   'Generated with Nixis: [link to github]
 #   Area per pixel at the equator.
 #   The scale of the data, e.g. the min and max height value, or temp, etc.
 #   Maybe the basic seed values of seed, divisions, and radius
 #   Maybe even steganography for funsies. https://www.thepythoncode.com/article/hide-secret-data-in-images-using-steganography-python
 # EXIF and steganography will obviously not work with all image formats, so, research what metadata can be stored on what formats.
-# ToDo: Support for user-defined unit scales? (e.g. save temps as C or F? I'm not sure if that would be visually different.)
+# TODO: Support for user-defined unit scales? (e.g. save temps as C or F? I'm not sure if that would be visually different.)
 def save_image(data, path, name):
     """Save a numpy array as an image file.
+
     data -- A dict. The key will be appended to the end of the file name.
     path -- The path to the folder where the file will be saved.
-    name -- File name without extension. Final output will be name_key.ext"""
-    # Retrieve file extension from Nixis options.json  # ToDo: Consider using the cfg module instead.
+    name -- File name without extension. Final output will be name_key.ext
+    """
+    # Retrieve file extension from Nixis options.json  # TODO: Consider using the cfg module instead.
     options = load_settings("options.json")
     fmt = options["img_format"]
 
@@ -470,11 +481,13 @@ def save_image(data, path, name):
 
 
 # TODO: This can be quite slow, and will need expanding to support RGB in the future.
-# TODO: Also relative vs absolute scaling, e.g. the commented out line that makes use of u_min and u_max
+# TODO: Also relative vs absolute scaling, e.g. add a mode parameter as a string and switch which line creates the dict based on that.
 def save_snapshot(arr: np.ndarray, step: int) -> None:
     """Save an image snapshot of the current iteration of some process.
+
     arr -- A 1d(?) numpy array indexed to the mesh's vertices.
-    step -- An integer of the current iteration step (used as name suffix)"""
+    step -- An integer of the current iteration step (used as name suffix).
+    """
     dictionary = {}
     # rescaled_h = rescale(arr, 0, 255)  #NOTE: Due to the relative nature of rescale, if the min or max height changes then the scale will be messed up.
     # dictionary[f"{step+1:03d}"] = rescaled_h
@@ -489,7 +502,7 @@ def save_snapshot(arr: np.ndarray, step: int) -> None:
     save_image(pixel_data, cfg.SNAP_DIR, cfg.WORLD_CONFIG["world_name"] + "_erosion_snapshot")
 
 
-# ToDo: Validate that we can import 16-bit data and keep it that way instead of converting to 8-bit
+# TODO: Validate that we can import 16-bit data and keep it that way instead of converting to 8-bit
 # Read an image into an array
 def image_to_array(image_file):
     """Load an image into a numpy array to use as source heights."""
@@ -514,7 +527,7 @@ def image_to_array(image_file):
 
 # =============================================
 
-# ToDo:
+# TODO:
 # - MAYBE add better support for multiple output formats (e.g. ply, obj, etc)
 # - Add support for exporting vertex color? But which data to use? Height?
 # - And consider binary vs ASCII formats for file size and import performance.
@@ -548,7 +561,7 @@ def save_mesh(verts, tris, path, name):
     time_end = time.perf_counter()
     print(f"Mesh saved in {time_end - time_start :.5f} sec")
 
-# ToDo: Implement this.  ply format, maybe obj? obj supports vertex data only?
+# TODO: Implement this.  ply format, maybe obj? obj supports vertex data only?
 # https://info.vercator.com/blog/what-are-the-most-common-3d-point-cloud-file-formats-and-how-to-solve-interoperability-issues
 def save_point_cloud(verts, path, name):
     """Save the planet as a point cloud that can be used in other software."""
@@ -564,7 +577,7 @@ def save_settings(data, path, name, fmt=None):
     with open(out_path, "w") as f:
         json.dump(data, f, indent=4)
 
-# ToDo: Handle error better if the file does not exist; probably should include a try/except as well.
+# TODO: Handle error better if the file does not exist; probably should include a try/except as well.
 def load_settings(path):
     """Load planet variables or Nixis options from a saved file."""
     if os.path.exists(path):
@@ -576,23 +589,25 @@ def load_settings(path):
         sys.exit(0)
     return options
 
-# ToDo: Implement this.
+# TODO: Implement this.
 def save_log(path, name, fmt=None):
     """Save a verbose debug log to a text file."""
     print("Not implemented yet.")
 
-# ToDo: Implement this. I'm thinking sqlite if there's a good python library.
+# TODO: Implement this. I'm thinking sqlite if there's a good python library.
 # https://sqlite.org/whentouse.html
 def export_planet(data, path, name):
     """Export the planet as a database file."""
-    print("Not implemented yet.")
+    print("Planet export not implemented yet.")
 
 # https://math.stackexchange.com/questions/2110160/find-percentage-value-between-2-numbers
 def find_percent_val(minval, maxval, percent):
     """Find the value that is the desired percent between a min and max number.
+
     minval -- The low number of the range.
     maxval -- The high number of the range.
-    percent -- A number between 0.0 and 100.0."""
+    percent -- A number between 0.0 and 100.0.
+    """
     if not 0.0 < percent < 100.0:
         print("\n" + "    ERROR: Percent must be between 0 and 100.")
         print("    Defaulting to 50 percent." + "\n")
@@ -602,30 +617,43 @@ def find_percent_val(minval, maxval, percent):
 
 def find_val_percent(minval, maxval, x):
     """Find the percentage of a value, x, between a min and max number.
+
     minval -- The low number of the range.
     maxval -- The high number of the range.
-    x -- A value between the min and max value."""
+    x -- A value between the min and max value.
+    """
     if not minval < x < maxval:
         print("\n" + "    ERROR: X must be between minval and maxval.")
-        print("    Defaulting to 50 percent because why not Zoidberg. (\/)ಠ,,,ಠ(\/)" + "\n")
+        print(r"    Defaulting to 50 percent because why not Zoidberg. (\/)ಠ,,,ಠ(\/)" + "\n")
 
-    return (x - minval) / (maxval - minval) * 100
+    return (x - minval) / (maxval - minval) * 100.0
 
 # https://stackoverflow.com/questions/7632963/numpy-find-first-index-of-value-fast/29799815#29799815
 @njit(cache=True)
-def find_first(item, vec):
-    """Return the index of the first occurence of item in vec."""
-    for i in range(len(vec)):  # Seems a smidge faster than enumerate
-        if item == vec[i]:
+def find_first(item, arr):
+    """Find the index of the first occurence of item in arr.
+
+    item -- The value you wish to find.
+    arr -- The iterable you are searching.
+    returns the index of item or -1 if it isn't present.
+    """
+    for i in range(len(arr)):  # Seems a smidge faster than enumerate
+        if item == arr[i]:
             return i
     # Safety fallback (probably shouldn't ever happen)
     return -1
 
-# ToDo: This is already pretty fast for k=2500 but maybe try prange later.
+# TODO: This is already pretty fast for k=2500 but maybe try prange later.
 # NOTE: prange may run into race condition with simultaneous find_first writes?
 @njit(cache=True)
 def build_adjacency(triangles):
-    """Build an array of adjacencies for each mesh vertex."""
+    """Build an array of adjacencies for each mesh vertex.
+
+    triangles -- numpy array of vertex indices arranged in groups of 3 that make a triangle [[1,2,3], [4,5,6]]
+    returns a numpy array of the same length as the planet's vertex count, with the indices of each vertex's 6 neighbor indices like:
+    [[1,2,3,4,5,6], [7,8,9,10,11,12]]
+    NOTE: The first 12 vertices will have one neighbor set to -1 because they only have 5 neighbor vertices.
+    """
     # The 12 original vertices have connectivity of 5 instead of 6 so for the
     # 6th number we assign -1 as there's no such thing as a vert with ID of -1
     adj = np.full((int((len(triangles)+4)/2), 6), -1, dtype=np.int32)
@@ -655,7 +683,7 @@ def build_adjacency(triangles):
     # e.g. The triangles [0,11,5] and [0,10,11] would produce [0-->11] and [11-->0] pairs when sliced forward only [v0,v1][v1,v2][v2,v0]
     # However we could probably build any tuples required on the fly like (v, adj[v][x]) where v is the first vert ID and x is the other vert ID from inside adj[v]
 
-# Takes only 4 seconds for a k=5000 mesh.
+# Takes only 4 seconds for a k=5000 mesh.  The only problem is I don't remember what this is for.
 @njit(cache=True, parallel=True, nogil=True)
 def build_tri_adjacency(triangles):
     adj = np.full((int((len(triangles)+4)/2), 6), -1, dtype=np.int32)
@@ -677,9 +705,9 @@ def next_vert(v, arr1, arr2):
 
 # Using numba's prange instead of python's range lets numba auto-parallelize
 # Takes about 5 seconds for a k=2500 mesh, otherwise would take ~10 seconds.
-# Note: This produces a proper 'cycle' for each vertex but the winding order
+# NOTE: This produces a proper 'cycle' for each vertex but the winding order
 # is not consistent; some are clockwise and some are counter-clockwise.
-# ToDo: Try to search for patterns in the vert order again. Maybe there might
+# TODO: Try to search for patterns in the vert order again. Maybe there might
 # be something like the winding order for even indexes is one way and the
 # order for odd indexes is the other way (probably not, but worth checking).
 # NOTE: There might be a smarter way to use np.in1d or np.intersect1d
@@ -716,8 +744,8 @@ def sort_adjacency(adj):
 
 # Based on https://stackoverflow.com/a/59634071
 def approx_size(x, name, flag="SI", verbose=False):
-    """Find the byte size of a numpy array or convert a number of bytes into
-    human-relevant terms.
+    """Find the byte size of a numpy array or convert a number of bytes into human-relevant terms.
+
     x -- Takes a numpy array, or can be an int or float of the number of bytes.
     Output will automatically be in the nearest relevant range, e.g. KB MB etc.
     name -- Name of the thing being measured (a label for print statements).

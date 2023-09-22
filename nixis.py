@@ -35,7 +35,7 @@ from climate import *
 #    Or maybe timeit https://docs.python.org/3/library/timeit.html
 #    https://www.geeksforgeeks.org/timeit-python-examples
 # - In addition to speed profiling, also do some memory profiling because this could end up needing many GB of RAM. (the verts + tris alone need 12.6 GB of RAM--EACH--when k=7500)
-# - Note: Voroni tesselation library: https://github.com/gdmcbain/voropy
+# - NOTE: Voroni tesselation library: https://github.com/gdmcbain/voropy
 # - Idea: Meshzoo is already really fast; I wonder if it can be @njitted (Answer: Not easily)
 # - One thing to test is that it may be faster to use predefined vertex, triangle, and adjacency arrays that we read from disk instead of building the mesh with meshzoo and building the adjacency every single time.
 #    This would mean there is less flexibility in choosing what level of subdivision to use when creating worlds but it might save on computation time and possibly on RAM since we don't have to make various copies
@@ -129,7 +129,7 @@ def main():
         help="Run Nixis without visualizing the final result in PyVista. \
         You may want to use this option for very large meshes or if you are \
         automating the export of maps without wanting to use the 3D viewer.")
-    # ToDo: Arg for user-defined output path\folder.
+    # TODO: Arg for user-defined output path\folder.
 
     # Dict to store any marker points we'd like to render
     surface_points = defaultdict(list)
@@ -143,7 +143,7 @@ def main():
 
     args = parser.parse_args()
 
-    # ToDo: If we ever need there to always be a vertex in the center of each of the original 20 triangles
+    # TODO: If we ever need there to always be a vertex in the center of each of the original 20 triangles
     # created by the original 12 vertices then ensuring that divisions is divisible by 6 will guarantee
     # that there is a vertex in the center of each of those triangles.
     # This might be useful if we need to know the longest possible distance between any two vertices on
@@ -171,7 +171,7 @@ def main():
     else:
         divisions = args.divisions + 1
         print(f"Even numbers only for divisions, please. Setting divisions to {divisions}.")
-    # ToDo: Let's try to estimate RAM usage based on what arguments have been passed (divisions, whether to export images, and climate/erosion flags) so we can add that to the warning.
+    # TODO: Let's try to estimate RAM usage based on what arguments have been passed (divisions, whether to export images, and climate/erosion flags) so we can add that to the warning.
     # https://www.thepythoncode.com/article/get-hardware-system-information-python
     if args.divisions > 2250:
         print("\n" + "WARNING. Setting divisions to a large value can consume gigabytes of RAM.")
@@ -204,7 +204,7 @@ def main():
         world_radius = 6378100.0  # Actual earth radius in meters
         # world_radius = 1.0  # In meters
 
-    if -90.0 <= args.tilt <= 90.0:  # ToDo: Make sure that the temperature and daily rotation calculations aren't fragile and then expand this to allow larger tilts.
+    if -90.0 <= args.tilt <= 90.0:  # TODO: Make sure that the temperature and daily rotation calculations aren't fragile and then expand this to allow larger tilts.
         axial_tilt = args.tilt      # e.g. Uranus and Venus have tilts > 90 (97 and 177, respectively) and several planets have retrograde rotation.
     else:
         print("\n" + "Axial tilt must be in the range -90 to +90." + "\n")
@@ -217,7 +217,7 @@ def main():
     star_radius = 696340  # Sol's radius in km
     star_temp = 5778  # Sol's surface temperature in Kelvin
 
-    options = load_settings("options.json")  # ToDo: If the user specifies args.save_img then we should grab the desired output maps from options.json. Right now the export_list dict is not being used at all.
+    options = load_settings("options.json")  # TODO: If the user specifies args.save_img then we should grab the desired output maps from options.json. Right now the export_list dict is not being used at all.
     cfg.WORK_DIR = os.path.dirname(os.path.abspath(__file__))
     cfg.SAVE_DIR = os.path.join(cfg.WORK_DIR, options["save_folder"])
     cfg.SNAP_DIR = os.path.join(cfg.WORK_DIR, options["save_folder"], options["snapshot_folder"])
@@ -228,9 +228,9 @@ def main():
     # Dict to store world data for image export
     export_list = {}
 
-    # ToDo: For both of the below we should possibly only try making the dir at the moment we save?
+    # TODO: For both of the below we should possibly only try making the dir at the moment we save?
     # Test if the directory already exists. Maybe even attempt to see if we have write permission beforehand.
-    # ToDo: Actual exception types
+    # TODO: Actual exception types
     # Also eventually these should perhaps be arguments for argparse, like --snap_e, --snap_c, or --snapshot_erosion, --snapshot_climate
     # if args.save_img or args.save_mesh or args.save_pointcloud or args.save_database or args.save_config:
     try:
@@ -272,7 +272,7 @@ def main():
     print("\n" + f"Script started at: {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}" + "\n")
 
     # NOTE: For k=2500 the mesh takes 17 seconds to build. For k=5000 it takes 69 seconds. For k=7500 it takes 159 seconds.
-    # ToDo: Consider searching for a library or algorithm that is faster and possibly that can generate only the vertices without the triangles (unsure if that's feasible; at the very least you do need edge pairs for subdividing)
+    # TODO: Consider searching for a library or algorithm that is faster and possibly that can generate only the vertices without the triangles (unsure if that's feasible; at the very least you do need edge pairs for subdividing)
     # in order to save RAM and avoid unnecessary computation; also one that can be @njit decorated or that has a C/C++ binary with a python interface.
     # Or take a look at forking and stripping down the icosa_sphere function from meshzoo to only the parts that are needed and try @njit decoration again. (parts of it have optional arguments that are not needed)
     # (NOTE: meshzoo is GPL v3; so if I do a stripped fork it'd be wise to use a separate repo and have it be a dependency)
@@ -299,7 +299,7 @@ def main():
 # Prepare KD Tree and stuff for image saving
 # =============================================
 
-    # ToDo: Test compact_nodes and balanced_tree args for build/query performance tradeoffs
+    # TODO: Test compact_nodes and balanced_tree args for build/query performance tradeoffs
     # NOTE: I've tested as high as k=7500 and the KD Tree took 264 seconds to build. Amazingly the query for the LL array only took half a second.
     # The Tree takes 114 seconds to build for k=5000, and 26 seconds for k=2500
     if args.save_img or snapshot_erosion or snapshot_climate:
@@ -340,7 +340,7 @@ def main():
 # Sample noise for initial terrain heights
 # =============================================
     # Initialize the permutation arrays to be used in noise generation
-    # ToDo: Test the updated opensimplex library and see if it has good performance so we wouldn't have to use our custom fork.
+    # TODO: Test the updated opensimplex library and see if it has good performance so we wouldn't have to use our custom fork.
     # https://github.com/lmas/opensimplex/issues/4#issuecomment-934671121
     perm, pgi = osi.init(world_seed)  # Very fast. 0.02 secs or better
 
@@ -355,7 +355,7 @@ def main():
     n_roughness = 2.5      # Multiply roughness by this much per octave
     n_persistence = 0.5    # Multiply strength by this much per octave
     n_octaves = 7          # Number of octaves
-    # ToDo: Figure out elevation scaling.  Earth's avg radius is 6.3781 million meters (6378 km). We consider "0" to be sea level. So I need to:
+    # TODO: Figure out elevation scaling.  Earth's avg radius is 6.3781 million meters (6378 km). We consider "0" to be sea level. So I need to:
     # 1. Get my heights in range -1 to +1 ? (This might not be required but might make step 3/4 more annoying than working with 0? Or not; the rescale process itself can reset the sea level to be the 0 altitude.)
     # 2. then choose sea level as a percent between the min and max
     # 3. For only heights above that sea level, rescale so that the max altitude is something reasonable (taking into account that a max height in 'absolute' m or km has to be scaled down to the sphere radius)
@@ -363,7 +363,7 @@ def main():
     # For reference, Mt. Everest is ~8848.86 m above sea level, the lowest land is the Dead Sea at -428 m below sea level, and the Mariana Trench has a depth of at least -10984 m below sea level. "Average" ocean floor is ~3.8 km.
     print("Sampling noise...")
 
-    # ToDo: Consider pulling arg values from cfg.py, options.json, seed json file, or as kwargs because this line is a long boi now.
+    # TODO: Consider pulling arg values from cfg.py, options.json, seed json file, or as kwargs because this line is a long boi now.
     height = sample_octaves(points, None, perm, pgi, n_octaves, n_init_rough, n_init_strength, n_roughness, n_persistence, world_radius)
 
     height = rescale(height, min_alt, max_alt)
@@ -371,7 +371,7 @@ def main():
 #    height = rescale(height, 0, 8850, 0, mode='upper')
 #    height = rescale(height, -1, 1)
 
-    # ToDo: Multiply the rescaled height times the world radius?
+    # TODO: Multiply the rescaled height times the world radius?
     minval = np.amin(height)
     maxval = np.amax(height)
     print("  Rescaled min:", minval)
@@ -416,7 +416,7 @@ def main():
     # https://en.wikipedia.org/wiki/Seafloor_depth_versus_age  MATH!
     #   https://www.youtube.com/watch?v=LoVNwLT092A  Artifexian video explaining some ocean floor stuff.
     #   https://docs.google.com/spreadsheets/d/1AML0mIQcWDrrEHj-InXoYsV_QlhlFVuUalE3o-TwQco/  Artifexian has a sheet you can make a copy of that includes a depth calculator.
-    # Side note: For planets with barely any water does it make sense to have a sea level based on water height?
+    # NOTE: For planets with barely any water does it make sense to have a sea level based on water height?
     #   E.G. Mars has no liquid water but scientists *did* give it a zero elevation, but it's based on other factors: https://en.wikipedia.org/wiki/Areography#Zero_elevation
 
 #    height *= world_radius  # Keeps the scale relative. NOTE: But don't multiply here, because that messes up the display of the scalar bar in pyvista. Instead, do this multiplication down inside the visualize function.
@@ -432,7 +432,7 @@ def main():
         export_list["height_relative"] = [ (rescale(height, 0, 65535)).astype('uint16') , 'gray']
 
 # Erode!
-# ToDo: Which came first, the erosion or the climate? Maybe do climate first, as the initial precipitation determines erosion rates.
+# TODO: Which came first, the erosion or the climate? Maybe do climate first, as the initial precipitation determines erosion rates.
 #   Temperature also determines evaporation rate which affects how much erosion we can do.
 #   And if we're being fancy with Thermal Erosion instead of approximating then we need surface temps first.
 #   However then the altitude-based temperature will be wrong, so, climate has to run again after erosion. (Really they probably need to alternate)
@@ -443,7 +443,7 @@ def main():
 
         # print(height)
         # print(type(height[0][0]))
-        # ToDo: Should probably have an ocean clip mask that I can pass through for
+        # TODO: Should probably have an ocean clip mask that I can pass through for
         # verts that should be ignored during erosion, although if land borders
         # ocean then it should be able to add to the ocean floor to some degree
         # until it uplifts above the ocean level, at which point it is removed from
@@ -456,7 +456,7 @@ def main():
 
         erode_start = time.perf_counter()
         # average_terrain2(cells, height, num_iter=1)
-        erode_terrain5p(points, neighbors, height, num_iter=100, snapshot=snapshot_erosion)  # ToDo: Placing the neighbors before the height probably violates my style guide.
+        erode_terrain5p(points, neighbors, height, num_iter=100, snapshot=snapshot_erosion)  # TODO: Placing the neighbors before the height probably violates my style guide.
         # average_terrain2(cells, height, num_iter=3)
         # average_terrain_weighted(points, cells, height, num_iter=30)  # No real benefit to this over a simple average as far as I can tell.
         erode_end = time.perf_counter()
@@ -483,7 +483,7 @@ def main():
 
         # print(newheight)
 
-        # ToDo: The ocean mask needs to be updated during/after erosion.
+        # TODO: The ocean mask needs to be updated during/after erosion.
         #  At the moment it isn't updated after initial creation from the
         #  simplex noise height.
 
@@ -528,7 +528,7 @@ def main():
 
         # NOTE: Instant insolation
         do_instant = True
-        if do_instant:  # ToDo: Work out the relationship between time of day and rotation at any longitude so we can specify a time at a location and automatically rotate by the correct amount.
+        if do_instant:  # TODO: Work out the relationship between time of day and rotation at any longitude so we can specify a time at a location and automatically rotate by the correct amount.
             print("Calculating solar insolation snapshot in time...")
             temp_start = time.perf_counter()
             insol_2 = calc_instant_insolation(points, height, world_radius, 0, current_tilt)
@@ -589,12 +589,12 @@ def main():
 
 # Save the world map to a texture file
 # =============================================
-# ToDo: Something to investigate later is that it might be better to save each image as soon as its source data (height, temperature, etc.) has been calculated
+# TODO: Something to investigate later is that it might be better to save each image as soon as its source data (height, temperature, etc.) has been calculated
 # rather than waiting to do all of them at the end (possible RAM use considerations).
     if args.save_img:
         print("Saving world map image(s)...")
 
-        # ToDo: 16-bit images.
+        # TODO: 16-bit images.
         # For grayscale exports* this has already been added to Nixis but for RGB this may require abandoning the pillow library. https://github.com/python-pillow/Pillow/issues/1888
         # *e.g. elevations rescale 0-65535 with 32768 as sea level (but when heights are already absolute just add 32768)
         # Idea: We could get half-meter precision if we have an export mode where we export bathymetry separately from land elevations;
@@ -653,7 +653,7 @@ def main():
         # print("After points")
         # print(points)
 
-        # ToDo: Get user confirmation for large meshes (large in the sense of vertex count but possibly also in radius)
+        # TODO: Get user confirmation for large meshes (large in the sense of vertex count but possibly also in radius)
         if args.save_mesh:
             if len(points) < 1500000:
                 save_mesh(points, cells, cfg.SAVE_DIR, world_name + '_final')
@@ -661,7 +661,7 @@ def main():
 
         visualize(points, cells, height, scalars, zero_level=ocean_level, surf_points=surface_points, radius=world_radius, tilt=current_tilt)
 
-        # ToDo: PyVista puts execution 'on hold' while it visualizes. After the user closes it execution resumes.
+        # TODO: PyVista puts execution 'on hold' while it visualizes. After the user closes it execution resumes.
         # Consider asking the user right here if they want to save out the result as a png/mesh/point cloud.
         # (Only if those options weren't passed as arguments at the beginning, else do that arg automatically and don't ask)
         # (There's also a PyVista mode that runs in the background and can be repeatedly updated? Look into that.)

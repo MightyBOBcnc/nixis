@@ -13,7 +13,7 @@ import cmocean
 # zmaps = cmocean.cm.get_cmap("thermal").copy()
 
 def add_points(pl, points):
-    # ToDo: Is it strictly necessary that these be np.arrays?
+    # TODO: Is it strictly necessary that these be np.arrays?
     for key, data in points.items():
         dots = pv.PolyData(np.array(data))
         pl.add_mesh(dots, point_size=10.0, color=key)
@@ -65,7 +65,7 @@ def visualize(verts, tris, heights=None, scalars=None, zero_level=0.0, surf_poin
 
     tri_size = None
     # tris = None
-    # ToDo: We could possibly just replace the tris array instead of making new_tris to save RAM,
+    # TODO: We could possibly just replace the tris array instead of making new_tris to save RAM,
     # as long as we do nothing else with it after visualizing, which currently we do not.
 
     # Create pyvista mesh from our icosphere
@@ -95,7 +95,7 @@ def visualize(verts, tris, heights=None, scalars=None, zero_level=0.0, surf_poin
     color_map, anno = make_scalars(scalars["s-mode"], scalars["scalars"])
     sargs = dict(n_labels=0, label_font_size=12, position_y=0.07, color="white")
 
-    # ToDo: Add title to the scalar bar sargs and dynamically change it based on what is being visualized (e.g. Elevation, Surface Temperature, etc.)
+    # TODO: Add title to the scalar bar sargs and dynamically change it based on what is being visualized (e.g. Elevation, Surface Temperature, etc.)
     # title="whatever" (remove the quotes and make 'whatever' into a variable, like the s-mode or whatever. like title=scalars["s-mode"])
     # "Current"? ".items()"? https://stackoverflow.com/questions/3545331/how-can-i-get-dictionary-key-as-variable-directly-in-python-not-by-searching-fr
     # https://stackoverflow.com/questions/16819222/how-to-return-dictionary-keys-as-a-list-in-python
@@ -142,13 +142,14 @@ def make_scalars(mode, scalars):
     elif mode == "elevation":
         # Derive percentage of transition from ocean to land from zero level
         # shore = ( (zero_level - minval) / (maxval - minval) ) - 0.001
+        # NOTE: We're assuming the shore is at elevation of 0 meters (and sometimes that assumption breaks things in buggy scenarios)
         shore = (find_val_percent(minval, maxval, 0) / 100) - 0.001
         nearshore = shore - 0.001
         print("cmap transition lower:", nearshore)
         print("cmap transition upper:", shore)
 
         color_map = LinearSegmentedColormap.from_list('ocean_and_topo', [(0, [0.1,0.2,0.6]), (nearshore, [0.8,0.8,0.65]), (shore, [0.3,0.4,0.0]), (1, [1,1,1])])
-        # ToDo: Investigate PyVista's LookupTable: https://docs.pyvista.org/version/stable/api/plotting/_autosummary/pyvista.LookupTable.html
+        # TODO: Investigate PyVista's LookupTable: https://docs.pyvista.org/version/stable/api/plotting/_autosummary/pyvista.LookupTable.html
         # I'd like to ditch matplotlib as a dependency if possible.
 
         # https://matplotlib.org/cmocean/
@@ -158,7 +159,7 @@ def make_scalars(mode, scalars):
         # anno = {minval:f"{minval:.2}", zero_level:"0.00", maxval:f"{maxval:.2}"}
         anno = {minval:f"{minval:.2}", find_percent_val(minval, maxval, nearshore*100):"0.00", maxval:f"{maxval:.2}"}
     else:
-        # ToDo: Better error handling.
+        # TODO: Better error handling.
         print("NO VALID SCALAR MODE SPECIFIED")
 
     return color_map, anno
