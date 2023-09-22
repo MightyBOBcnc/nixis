@@ -191,8 +191,10 @@ def main():
         # rng = np.random.default_rng(i)
         # rng.random()
 
+# TODO: Test for delicacy and safety with various inputs such as forward/backward slashes, 'invalid' weird inputs, symbols,
+# apostrophes (because fantasy names have so many apostrophes), hyphens, etc. (slashes result in a 'safe' file path error)
     if args.name:
-        world_name = args.name  # ToDo: Test for delicacy and safety with various inputs such as forward/backward slashes, 'invalid' weird inputs, symbols, etc. (slashes result in a 'safe' file path error)
+        world_name = args.name
     else:
         world_name = str(world_seed) + "_" + str(divisions)
 
@@ -454,11 +456,30 @@ def main():
 
         erode_start = time.perf_counter()
         # average_terrain2(cells, height, num_iter=1)
-        erode_terrain6(points, neighbors, height, num_iter=100, snapshot=snapshot_erosion)  # ToDo: Placing the neighbors before the height probably violates my style guide.
+        erode_terrain5p(points, neighbors, height, num_iter=100, snapshot=snapshot_erosion)  # ToDo: Placing the neighbors before the height probably violates my style guide.
         # average_terrain2(cells, height, num_iter=3)
         # average_terrain_weighted(points, cells, height, num_iter=30)  # No real benefit to this over a simple average as far as I can tell.
         erode_end = time.perf_counter()
         print(f"Erosion runtime: {erode_end-erode_start:.5f}")
+
+        new_min = np.amin(height)
+        new_max = np.amax(height)
+
+        print(f"New min elevation: {new_min}")
+        print(f"New max elevation: {new_max}")
+
+        debug_spikes = False
+        list_verts = False
+        if debug_spikes:
+            print(f"Lowest vertex ID: {find_first(new_min, height)}")
+            print(f"Highest vertex ID: {find_first(new_max, height)}")
+
+            if list_verts:
+                # Test for an arbitrary condition you want to check
+                bugged_verts, = np.where(height > 10000)
+                print(bugged_verts)
+                bugged_verts = None
+
 
         # print(newheight)
 
