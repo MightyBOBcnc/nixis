@@ -13,6 +13,7 @@ import cmocean
 # zmaps = cmocean.cm.get_cmap("thermal").copy()
 
 def add_points(pl, points):
+    """Add individual points to render in the PyVista plotter."""
     # TODO: Is it strictly necessary that these be np.arrays?
     for key, data in points.items():
         dots = pv.PolyData(np.array(data))
@@ -20,6 +21,7 @@ def add_points(pl, points):
 
 
 def add_lines(pl, radius, tilt):
+    """Add informational lines (e.g. axes and tilt) to render in the PyVista plotter."""
     x_axisline = pv.Line([-1.5*radius,0,0],[1.5*radius,0,0])
     y_axisline = pv.Line([0,-1.5*radius,0],[0,1.5*radius,0])
     z_axisline = pv.Line([0,0,-1.5*radius],[0,0,1.5*radius])
@@ -42,10 +44,9 @@ def add_lines(pl, radius, tilt):
 
 
 def visualize(verts, tris, heights=None, scalars=None, zero_level=0.0, surf_points=None, radius=1.0, tilt=0.0):
-    """Visualize the output."""
+    """Visualize the output in PyVista."""
     pl = pv.Plotter()
     pl.background_color = "#4c4c4cff"
-
 
     if scalars["s-mode"] in ("insolation", "temperature"):
         show_ocean_shell = False
@@ -116,6 +117,7 @@ def visualize(verts, tris, heights=None, scalars=None, zero_level=0.0, surf_poin
 
 
 def make_scalars(mode, scalars):
+    """Make the color scalars to be used on the planet, and scalar bar annotations."""
     # Define the colors we want to use (NOT BEING USED AT THE MOMENT)
     # blue = np.array([12/256, 238/256, 246/256, 1])
     # black = np.array([11/256, 11/256, 11/256, 1])

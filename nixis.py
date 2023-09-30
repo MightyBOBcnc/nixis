@@ -173,6 +173,8 @@ def main():
         print(f"Even numbers only for divisions, please. Setting divisions to {divisions}.")
     # TODO: Let's try to estimate RAM usage based on what arguments have been passed (divisions, whether to export images, and climate/erosion flags) so we can add that to the warning.
     # https://www.thepythoncode.com/article/get-hardware-system-information-python
+    # TODO: Also, because we want Nixis to be automation-friendly we should probably have some sort of argument that suppresses this warning like --nocomplain or --bigmesh or something.
+    # Because we will assume that anyone calling that argument knows what they're doing and we're not going to hold their hand.
     if args.divisions > 2250:
         print("\n" + "WARNING. Setting divisions to a large value can consume gigabytes of RAM.")
         print(f"         The 3D mesh will have {divisions * divisions * 10 + 2:,} vertices.")
@@ -214,8 +216,8 @@ def main():
 
     world_albedo = 0.31  # Approximate albedo of Earth
     orbital_distance = 149597870.7  # 1 AU in km
-    star_radius = 696340  # Sol's radius in km
-    star_temp = 5778  # Sol's surface temperature in Kelvin
+    star_radius = 696340.0  # Sol's radius in km
+    star_temp = 5778.0  # Sol's surface temperature in Kelvin
 
     options = load_settings("options.json")  # TODO: If the user specifies args.save_img then we should grab the desired output maps from options.json. Right now the export_list dict is not being used at all.
     cfg.WORK_DIR = os.path.dirname(os.path.abspath(__file__))

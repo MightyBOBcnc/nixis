@@ -185,7 +185,7 @@ def deg2day(year_length, degrees):
 # https://www.geeksforgeeks.org/python-find-closest-number-to-k-in-given-list/
 @njit(cache=True)
 def find_nearest(arr, num):
-    """Find the index of the number nearest to the provided number."""
+    """Find the index of the number in an array nearest to the provided number."""
     # idx = (np.abs(arr - num)).argmin()
     # return arr[idx]  # Returns the value of the nearest number
     return (np.abs(arr - num)).argmin()  # Returns the index
@@ -199,6 +199,7 @@ def find_nearest(arr, num):
 @njit(cache=True)
 def calc_seasonal_tilt(axial_tilt, degrees):
     """Find the seasonal tilt offset from axial tilt and orbit (in degrees)
+
     axial_tilt -- The planet's tilt. e.g. Earth's tilt is 23.44 degrees.
     degrees -- How far along is the planet in its orbit around its star?
     (between 0 and 360. 0/360 and 180 are equinoxes. 90 and 270 are solstices.)
@@ -209,9 +210,11 @@ def calc_seasonal_tilt(axial_tilt, degrees):
 
 def calc_tsi(star_radius, star_temp, orbital_distance):
     """Calculate the Total Solar Irradiance at the top of the atmosphere.
+
     star_radius -- in km
     star_temp -- in kelvin
-    orbital_distance -- in km"""
+    orbital_distance -- in km
+    """
     # Calculate the star's black-body radiation
     energy_at_sun = SBC * star_temp**4 * (4 * np.pi * star_radius**2)  # Energy at the star's surface
     energy_at_planet = energy_at_sun / (4 * np.pi * orbital_distance**2)  # Energy at the planet's orbit
@@ -235,7 +238,7 @@ def calc_planet_equilibrium(flux, albedo, radius=1):
     # NOTE: The visualization issue might possibly have been fixed when I fixed the NaN problem with xyz2latlon.
 
     planet_cross_section = np.pi * earth_radius**2
-    planet_surface_area = 4 * np.pi * earth_radius**2  # Sunlight only falls on half of the surface area, however
+    planet_surface_area = 4.0 * np.pi * earth_radius**2  # Sunlight only falls on half of the surface area, however
 
     # TODO: energy at the cross section, energy reduced by albedo, and maybe energy that bounces off the atmosphere? not sure if that's the same thing.  or maybe I meant absorbed by the atmosphere so it doesn't reach ground.
     # For basic temp assignment, I could start by calculating the airless body temperature and then just multiply by a fudge factor for greenhouse effect. (e.g. earth is like 34 C higher than it would be with no atmospheric blanket)
@@ -246,7 +249,7 @@ def calc_planet_equilibrium(flux, albedo, radius=1):
     surface_watts = energy_in * 0.682  # After factoring out albedo bounce, this is how much the surface absorbs in W/m^2
 
     # These values would probably be derived from the gas/aerosol composition of the atmosphere (likely including water vapor but possibly not clouds as that's albedo?)
-    # (I think the open source "Thrive" by Revolutionary Games does this; e.g. calculating light blockage via its wavelength in nanometers vs size of molecules)
+    # (I think the open source "Thrive" by Revolutionary Games does this; e.g. calculating light blockage via its wavelength in nanometers vs size of molecules in the air)
     # Amount of incoming shortwave light frequencies that makes it down through the atmosphere
     shortwave_transmittance = 0.9
     # Amount of outgoing longwave IR frequencies that makes it out through the atmosphere
@@ -274,6 +277,7 @@ def calc_planet_equilibrium(flux, albedo, radius=1):
     print("--Original surface temp: ", avg_surface_temp_unmodified)
     print("--Modified surface temp: ", avg_surface_temp_greenhouse)
 
+# TODO: This may benefit from numba compilation even though it's linear, not parallel.
 def calc_water_equilibrium(flux):
     """Calculate the equilibrium temperature for a block of water."""
     edge_length = 1.0  # In meters
@@ -488,7 +492,8 @@ def brute_daily_insolation(verts, altitudes, radius, tilt, snapshot=False):
         sample_insolation(surface_temps, verts, radius, rotation, tilt)
         rotation += rot_amt
 
-        if snapshot:  #TODO: This is quite slow.
+        if snapshot:
+            # TODO: Replace with save_snapshot function from util.py as appropriate.
             dictionary = {}
             rescaled_i = rescale(surface_temps, 0, 255)  #NOTE: Due to the relative nature of rescale, if the min or max insolation changes then the scale will be messed up.
             dictionary[f"{i+1:03d}"] = [rescaled_i, 'gray']  # Could instead possibly just multiply the absolute value x10 or square it or something and use a 16-bit image instead of 8-bit.
@@ -576,7 +581,7 @@ def interpolate_insolation(verts, lookup_table, insolation, radius):
         upper = int(np.ceil(lat))
 
         if -90 > lower or -90 > upper or lower > 90 or upper > 90:
-            print("OUT OF RANGE SOMEHOW!")
+            print("INTERPOLATION OUT OF RANGE SOMEHOW!")
             print("lower:", lower)
             print("upper:", upper)
 
@@ -611,6 +616,7 @@ def calc_yearly_insolation(points, height, radius, axial_tilt, snapshot=False):
         annual_insolation += insolation  # Accumulate insolation for x number of days
 
         if snapshot:
+            # TODO: Replace with save_snapshot function from util.py as appropriate.
             dictionary = {}
             rescaled_i = rescale(insolation, 0, 255)  #NOTE: Due to the relative nature of rescale, if the min or max insolation changes then the scale will be messed up.
             dictionary[f"{x+1:03d}"] = [rescaled_i, 'gray']  # Could instead possibly just multiply the absolute value x10 or square it or something and use a 16-bit image instead of 8-bit.
@@ -677,6 +683,8 @@ def assign_surface_humidity(verts, water_mask):
 @njit(cache=True)
 def lerp(input1, input2, mask):
     """Lerp between two values based on a 0-1 mask value.
+
     When mask is 0, return input1. When mask is 1, return input2.
-    Otherwise blend between the two."""
+    Otherwise blend between the two.
+    """
     return ((1 - mask) * input1) + (mask * input2)

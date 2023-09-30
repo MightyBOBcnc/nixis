@@ -348,6 +348,8 @@ def make_rgb_array(width, height, dists, nbrs, colors):
             # For this perhaps I could have the function take an argument like 'AA' for anti-aliashed.  If True, use the weighted distance logic. Else use a different logic. Maybe even split the logics out to different functions.
             # The other logic could possibly use the weighted distance logic with 1 extra step on the end that simply rounds to either the lowest or highest value (e.g. 0 or 1, 0 or 255).
             # https://math.stackexchange.com/questions/3817854/formula-for-inverse-weighted-average-smaller-value-gets-higher-weight
+            # TODO: We're also going to eventually need a way to get the proper color for shallow water depths (e.g. like the pretty teal Caribbean shallows),
+            # and we will need to deal with anti-aliasing the land/water borders at coasts.
             sd = np.sum(dists[h][w])  # Sum of distances
             # Add a tiny amount to each i to (hopefully) prevent NaN and div by 0 errors
             ws = np.array([1 / ((i+0.00001) / sd) for i in dists[h][w]], dtype=np.float64)  # weights
@@ -697,6 +699,13 @@ def build_tri_adjacency(triangles):
 # This is ~10x faster than a list comprehension when numba gets its hands on it
 @njit(cache=True)
 def next_vert(v, arr1, arr2):
+    """Find the index of a vertex that is present in two arrays and that is not the supplied index. \
+
+    v -- The index of a vertex that is in both arrays, but which we do NOT want as the next vertex. \
+    Each array will typically have two vertices in common and v is the one we wish to exclude.
+    arr1 -- The first array of vertex indices.
+    arr2 -- The second array of vertex indices.
+    """
     for i in arr1:
         if i in arr2:
             if i != v:
@@ -717,6 +726,11 @@ def next_vert(v, arr1, arr2):
 # Or it might already be as fast as it's going to get.
 @njit(cache=True, parallel=True, nogil=True)
 def sort_adjacency(adj):
+    """Takes an array of vertex adjacencies and sorts it so that for each vertex's neighbors \
+       the neighbors wind around the vertex in a connected order. Note that the order is \
+       not uniform. Some wind clockwise and others wind counter-clockwise. \
+       This non-uniformity preferably should be fixed.
+       """
     for idx in prange(12):  # Prange for 12 verts is probably overkill.
         visited = np.full(6, -1, dtype=np.int32)
         pv = idx
@@ -731,13 +745,17 @@ def sort_adjacency(adj):
 
     for idx in prange(12, len(adj)):
         visited = np.full(6, -1, dtype=np.int32)
-        pv = idx
-        nv = adj[idx][0]
+        pv = idx  # Previous Vert starts as the index of the current vert
+        nv = adj[idx][0]  # Next Vert starts as the first vert in the current vert's neighbors
         # All remaining verts have connectivity 6
         for i in prange(5):
             visited[i] = nv
-            nv = next_vert(pv, adj[idx], adj[nv])
-            pv = visited[i]
+            nv = next_vert(pv, adj[idx], adj[nv])  # Find new next vert that isn't the previous vert
+            pv = visited[i]  # Set new previous vert
+        # NOTE: I wonder if the reason why some wind clockwise and others wind counter-clockwise is because we write to the adjacency
+        # array while also reading from it, which changes the order for subsequent reads for any neighbors that are processed afterward.
+        # TODO: Test what happens to the winding order if we run this without prange. If the winding order in the test is uniform then we might have
+        # to alter this to make a temporary copy (or empty) adjacency array to write the new values and then replace the original at the end.
         visited[5] = nv
         adj[idx] = visited
 
@@ -749,15 +767,15 @@ def approx_size(x, name, flag="SI", verbose=False):
     x -- Takes a numpy array, or can be an int or float of the number of bytes.
     Output will automatically be in the nearest relevant range, e.g. KB MB etc.
     name -- Name of the thing being measured (a label for print statements).
-    flag -- Output can use SI units (e.g. Megabytes) or binary (e.g Mebibytes).
-    verbose -- Print additional info if x is a numpy array. Default: False
+    flag -- String. Output can use "SI" units (e.g. Megabytes) or "BINARY" (e.g Mebibytes).
+    verbose -- Prints additional info if x is a numpy array. Default: False
     """
     # https://physics.nist.gov/cuu/Units/binary.html
     units = {1000: ['KB', 'MB', 'GB', 'TB'],
              1024: ['KiB', 'MiB', 'GiB', 'TiB']}
-    if flag == "SI":
+    if flag.upper() == "SI":
         mult = 1000
-    elif flag == "BINARY":
+    elif flag.upper() == "BINARY":
         mult = 1024
 
     if isinstance(x, np.ndarray):
