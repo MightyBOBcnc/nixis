@@ -466,9 +466,9 @@ def build_image_data(colors=None):  # Could rename this to like make_image_data 
 def save_image(data, path, name):
     """Save a numpy array as an image file.
 
-    data -- A dict. The key will be appended to the end of the file name.
+    data -- A dict. The key will be appended to the end of the file name. The value is the image data.
     path -- The path to the folder where the file will be saved.
-    name -- File name without extension. Final output will be name_key.ext
+    name -- File name without extension. Final output will be name_key.extension
     """
     # Retrieve file extension from Nixis options.json  # TODO: Consider using the cfg module instead.
     options = load_settings("options.json")
@@ -478,8 +478,8 @@ def save_image(data, path, name):
         out_path = os.path.join(path, f"{name}_{key}.{fmt}")
         # img = Image.fromarray(array.astype('uint8'))
         # img = Image.fromarray(array[:,:,0])  # If an array is RGB (if each pixel has 3 values) this will slice it to only have 1 value, i.e. grayscale, which pillow CAN do.  (Will work for uint16 and uint8 grayscale)
-        img = Image.fromarray(array)
-        img.save(out_path)
+        img = Image.fromarray(array)  # This is very fast
+        img.save(out_path)  # This is a slow bottleneck
 
 
 # TODO: This can be quite slow, and will need expanding to support RGB in the future.
