@@ -316,8 +316,9 @@ def main():
         kdt_end = time.perf_counter()
         # For each pixel's 3D coordinates, this is the 3 nearest vertices, and the distances to said vertices.
         # The name kinda sucks though. Maybe we could rename it img_pixel_neighbors.
-        print("Building query...")
-        cfg.IMG_QUERY_DATA = cfg.KDT.query(ll, k=3, workers=-1)
+        print("  Building query...")
+        build_img_query(ll)
+        # TODO: Re-measure performance. After overhauling the way images are saved it is likely worse.
         #Performance (k=320):
         # 2k * 1k image:   0.15 seconds
         # 4k * 2k image:   0.65 seconds

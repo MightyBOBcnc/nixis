@@ -275,24 +275,61 @@ def power_rescale(x, mask=None, mode=None, power=1.0):
 
 
 # NOTE: Unused.
-def make_ranges(arr_len, threads):
-    """Make number ranges for threading from a given length.
+def make_ranges(arr_len, buckets):
+    """Make number ranges from a given length for dividing a task into chunks.
 
     arr_len -- Integer. The length of the data to be split.
-    threads -- Integer. The number of chunks/threads you want to use.
+    buckets -- Integer. The number of buckets you want to use.
     """
-    x = int(arr_len/threads)
+    if buckets == 1:
+        return [(0, arr_len)]
+
+    x = int(arr_len/buckets)
     # print("x is", x)
     range_list = []
-    for i in range(threads + 2):
-        if 1 < i < threads + 1:
-            range_list.append(((i-1)*x + 1, i*x))
-        elif i == 0:
+    for i in range(buckets + 2):
+        if i == 0:
             range_list.append((i, i+x))
-        elif i == threads:
+        elif i == buckets:
             range_list.append(((i-1)*x + 1, arr_len))
+        elif 1 < i < buckets + 1:
+            range_list.append(((i-1)*x + 1, i*x))
     # print(range_list)
     return range_list
+
+
+def build_img_query(ll_array):
+    """Build KD Tree query, splitting into chunks if needed.
+
+    ll_array -- The numpy array of shape (height, width, 3) containing XYZ coords \
+    for each pixel's latitude/longitude.
+    """
+    width = ll_array.shape[1]
+    height = ll_array.shape[0]
+
+    chunk_size = 0
+    for i in range(height):
+        # if width * i >= 67108864:  # More stringent option
+        if width * i >= 83886080:
+            # chunk_size -= 1  # For safety. Have not yet run into a need for this.
+            break
+        chunk_size += 1
+    # print(" Chunk size:", chunk_size)
+
+    if chunk_size == height:
+        cfg.IMG_QUERY_DATA = cfg.KDT.query(ll_array, k=3, workers=-1)
+    elif chunk_size < height:
+        dists = np.zeros_like(ll_array, dtype=np.float32)
+        ids = np.zeros_like(ll_array, dtype=np.uint32)
+        for i in range(0, height, chunk_size):
+            # NOTE: If np.copyto or unsafe casting causes future problems then e.g.
+            # "dists[i:min(height, i + chunk_size)] += dist_chunk" will work fine.
+            dist_chunk, id_chunk = cfg.KDT.query(ll_array[i:min(height, i + chunk_size)], k=3, workers=-1)
+            np.copyto(dists[i:min(height, i + chunk_size)], dist_chunk, casting="unsafe")
+            np.copyto(ids[i:min(height, i + chunk_size)], id_chunk, casting="unsafe")
+
+        cfg.IMG_QUERY_DATA = (dists, ids)
+
 
 def build_KDTree(points, lf=10):
     """Build a KD-Tree from vertices with scipy."""
@@ -302,8 +339,7 @@ def build_KDTree(points, lf=10):
     # https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.KDTree.html
     cfg.KDT = KDTree(points, leafsize=lf)
     time_end = time.perf_counter()
-    print(f"KD built in {time_end - time_start :.5f} sec")
-    # return cfg.KDT  # No point in returning if it's already saved to cfg
+    # print(f"KD Tree built in {time_end - time_start :.5f} sec")
 
 # =============================================
 # Image-related utilities
@@ -409,8 +445,8 @@ def build_image_data(colors=None):  # Could rename this to like make_image_data 
 
     print("Sampling verts for texture...")
 
-    dists = cfg.IMG_QUERY_DATA[0]  # numpy float64
-    nbrs = cfg.IMG_QUERY_DATA[1]   # numpy int64
+    dists = cfg.IMG_QUERY_DATA[0]  # numpy float64 if the image is small, else float32
+    nbrs = cfg.IMG_QUERY_DATA[1]   # numpy int64 if the image is small, else uint32
     result = {}
 
     if not isinstance(colors, dict):
