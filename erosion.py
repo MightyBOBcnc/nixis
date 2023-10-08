@@ -71,7 +71,8 @@ def calc_distance(v0, v1):
     v1 -- The XYZ coordinates of the second vertex.
     v0 and v1 must both be an iterable with 3 items each.
     """
-    return np.sqrt( (v0[0] - v1[0])**2 + (v0[1] - v1[1])**2 + (v0[2] - v1[2])**2 )
+    # sqrt( (X2 - X1)^2 + (Y2 - Y1)^2 + (Z2 - Z1)^2 )
+    return np.sqrt( (v1[0] - v0[0])**2 + (v1[1] - v0[1])**2 + (v1[2] - v0[2])**2 )
 
 @njit(cache=True, parallel=False, nogil=False)
 def check_world_slopes(heights, verts, nbrs):
@@ -1039,6 +1040,7 @@ def erode_terrain7(cells):
 # In the end, you divide by 2 because you counted each contribution twice. Of course, you wouldn't use explicit Python loops, but np.add.at or npx.sum_at.
 # https://numpy.org/doc/stable/reference/generated/numpy.ufunc.at.html
 # https://github.com/nschloe/npx#sum_atadd_at
+# NOTE: Numba does not yet support the "at" ufunc.
 
 
 # =========================
@@ -1046,7 +1048,6 @@ def erode_terrain7(cells):
 # Observation 1: At higher levels of iterations (like 10+)
 #   some line artifacts appear around the 12 verts with connectivity 5.
 #   But that's far more iterations than should be used.
-#   Perhaps a distance-weighted average like my image exports could solve that.
 
 # Observation 2: The averaging effect becomes much weaker when the dvisions
 #   increase because each vertex becomes much closer to each other vertex.
@@ -1071,7 +1072,7 @@ def average_terrain1(tris, height, num_iter=1, snapshot=False):
     """Average terrain heights in place."""
     print("Averaging terrain...")
     if num_iter <= 0:
-        num_iter = 1
+        num_iter = 1  # TODO: Better error handling.
         print(" ERROR: Cannot have less than 1 iteration.")
 
     neighbors = build_adjacency(tris)
@@ -1085,6 +1086,8 @@ def avg_terrain_iteration1(nbrs, r_buff):
     """For each vertex, set its height to the average of its neighbors' heights,
     ignoring its own height (average only ring 1, excluding center vertex).
     """
+    # NOTE: This is a little weird. We're doing reads from the copy and then doing writes into the original.
+    # On the plus side this saves us from needing a copying step at the end.
     height_buffer = np.copy(r_buff)
 
     for v in prange(12):
@@ -1099,6 +1102,7 @@ def avg_terrain_iteration1(nbrs, r_buff):
             new += height_buffer[n]
         r_buff[v] = new / 6
 
+
 # This version is a little more crisp than averaging only ring 1.
 # (Which makes sense because taking the average of ring 1 only is
 # effectively discarding some data, making it less accurate.)
@@ -1106,7 +1110,7 @@ def average_terrain2(tris, height, num_iter=1, snapshot=False):
     """Average terrain heights in place."""
     print("Averaging terrain...")
     if num_iter <= 0:
-        num_iter = 1
+        num_iter = 1  # TODO: Better error handling.
         print(" ERROR: Cannot have less than 1 iteration.")
 
     neighbors = build_adjacency(tris)
@@ -1119,6 +1123,8 @@ def average_terrain2(tris, height, num_iter=1, snapshot=False):
 def avg_terrain_iteration2(nbrs, r_buff):
     """For each vertex, set its height to the average of its own and its ring 1 neighbors' heights.
     """
+    # NOTE: This is a little weird. We're doing reads from the copy and then doing writes into the original.
+    # On the plus side this saves us from needing a copying step at the end.
     height_buffer = np.copy(r_buff)
 
     for v in prange(12):
@@ -1135,15 +1141,15 @@ def avg_terrain_iteration2(nbrs, r_buff):
         new += height_buffer[v]
         r_buff[v] = new / 7
 
-# Ring 1 average only, I think?
+
 def average_terrain_weighted(verts, tris, height, num_iter=1, snapshot=False):
     """Average terrain heights in place using a distance weighted average.
     For each vertex, set its height to the distance weighted average of ring 1
-    around that vertex, not including the height of the center vertex(?).
+    around that vertex, not including the height of the center vertex.
     """
     print("Averaging terrain...")
     if num_iter <= 0:
-        num_iter = 1
+        num_iter = 1  # TODO: Better error handling.
         print(" ERROR: Cannot have less than 1 iteration.")
 
     neighbors = build_adjacency(tris)
@@ -1160,7 +1166,11 @@ def average_terrain_weighted(verts, tris, height, num_iter=1, snapshot=False):
 @njit(cache=True, parallel=True, nogil=True)
 def build_distances(verts, nbrs):
     """Find distances to each vertex's neighbors."""
-    result = np.ones_like(nbrs, dtype=np.float64)  # TODO: Is it correct for the first 12 verts to have positive 1 as a distance for the 6th position?
+    # TODO: Is it correct for the first 12 verts to have positive 1 as a distance for the 6th position?
+    # The only place that is using this function uses an array slice that ignores the 6th position but
+    # this function may have other uses in the future where that might be a problem. Use -1 instead?
+    # np.full((int(len(some_array)), 6), -1, dtype=np.some_dtype)
+    result = np.ones_like(nbrs, dtype=np.float64)
 
     for v in prange(len(verts)):
         for i, n in enumerate(nbrs[v]):
@@ -1171,6 +1181,9 @@ def build_distances(verts, nbrs):
 def avg_terrain_weighted_iteration(verts, nbrs, dists, r_buff):
     height_buffer = np.copy(r_buff)
 
+    # TODO: Seeing that the inverse distance weighted code is being used in at least 3 places
+    # it should probably be broken out into its own function, likely structured to take 1
+    # array row at a time so that we can pass in slices like dists[v][:5] for the first 12 verts.
     for v in prange(12):
         sd = np.sum(dists[v][:5])  # Sum of distances
         # Add a tiny amount to each i to (hopefully) prevent NaN and div by 0 errors

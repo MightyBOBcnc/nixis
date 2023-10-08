@@ -6,7 +6,7 @@ SNAP_DIR = None
 
 WORLD_CONFIG = {}
 
-# KD Tree
+# KD Tree is used for nearest-neighbor searches.
 KDT = None
 
 # For image exports, each pixel's 2D latitude/longitude is converted to 3D XYZ

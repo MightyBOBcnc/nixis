@@ -307,6 +307,7 @@ def main():
     if args.save_img or snapshot_erosion or snapshot_climate:
         time_start = time.perf_counter()
         # Array of 3D coordinates on the sphere for each pixel that will be in the exported image.
+        # NOTE: If this becomes too large for ultra-sized images we could generate it in chunks (and restructure build_KDTree).
         ll = make_ll_arr(img_width, img_height, world_radius)
         # NOTE: What if we did the reverse of this? Instead of converting 2D lat/lon of the pixels into 3D coordinates and then doing a KD Tree query in 3 dimensions,
         # what if we took the 3D coordinates of every mesh vertex and converted them into 2D coordinates and then did the nearest neighbor search in 2D?
@@ -315,7 +316,7 @@ def main():
         build_KDTree(points)
         kdt_end = time.perf_counter()
         # For each pixel's 3D coordinates, this is the 3 nearest vertices, and the distances to said vertices.
-        # The name kinda sucks though. Maybe we could rename it img_pixel_neighbors.
+        # NOTE: The name kinda sucks though. Maybe we could rename it img_pixel_neighbors.
         print("  Building query...")
         build_img_query(ll)
         # TODO: Re-measure performance. After overhauling the way images are saved it is likely worse.
@@ -461,7 +462,7 @@ def main():
         # average_terrain2(cells, height, num_iter=1)
         erode_terrain5p(points, neighbors, height, num_iter=100, snapshot=snapshot_erosion)  # TODO: Placing the neighbors before the height probably violates my style guide.
         # average_terrain2(cells, height, num_iter=3)
-        # average_terrain_weighted(points, cells, height, num_iter=30)  # No real benefit to this over a simple average as far as I can tell.
+        # average_terrain_weighted(points, cells, height, num_iter=3)  # NOTE: No real benefit to this over a simple average as far as I can tell.
         erode_end = time.perf_counter()
         print(f"Erosion runtime: {erode_end-erode_start:.5f}")
 
